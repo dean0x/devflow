@@ -14,7 +14,7 @@ import model from '../src/hud/components/model.js';
 import contextUsage from '../src/hud/components/context-usage.js';
 import sessionDuration from '../src/hud/components/session-duration.js';
 import usageQuota, { formatCountdown } from '../src/hud/components/usage-quota.js';
-import weekForecast, { parseWeekPoint } from '../src/hud/components/week-forecast.js';
+import weekForecast, { forecastPercentText, parseWeekPoint, weekForecastFrom } from '../src/hud/components/week-forecast.js';
 import codexQuota from '../src/hud/components/codex-quota.js';
 import todoProgress from '../src/hud/components/todo-progress.js';
 import sessionCost from '../src/hud/components/session-cost.js';
@@ -532,6 +532,17 @@ describe('weekForecast component', () => {
     ['only 5 hours elapsed', week(40, resetIn(163))],
   ] as const)('shows nothing with %s', async (_label, stdin) => {
     expect(await renderForecast(stdin)).toBeNull();
+  });
+
+  it.each([
+    [999.49, '999%'],
+    [999.5, '>999%'],
+  ] as const)('formats a forecast of %s as %s', (percent, text) => {
+    expect(forecastPercentText(percent)).toBe(text);
+  });
+
+  it('returns no forecast for a past reset without the parser', () => {
+    expect(weekForecastFrom({ usedPercent: 40, resetsAtMs: nowMs - 1000 }, nowMs)).toBeNull();
   });
 
   it('accepts a reset exactly 8 days away but not one second later', () => {

@@ -31,8 +31,11 @@ export function parseWeekPoint(sevenDay: unknown, nowMs: number): WeekPoint | nu
  * D-HUD-WEEK-FORECAST: Copy forecastFrom from tokenmeter 0.3.0.
  * The installed HUD cannot import the package. A devflow-only user has no stored Claude data.
  * D-TOKENMETER-HUD covers only the Codex client. Like usageQuota, this part uses stdin.
+ * Return null unless the reset is after nowMs.
  */
 export function weekForecastFrom({ usedPercent, resetsAtMs }: WeekPoint, nowMs: number) {
+  if (!(resetsAtMs > nowMs)) return null;
+
   const elapsedMs = nowMs - (resetsAtMs - WEEK_MS);
   if (!(elapsedMs >= BURN_FREE_FRACTION * WEEK_MS)) return null;
 
