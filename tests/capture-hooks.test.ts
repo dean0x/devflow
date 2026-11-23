@@ -227,7 +227,7 @@ describe('capture-turn', () => {
   it('AC-F2: last_assistant_message present -> one {role:"assistant"} row to both queues', () => {
     runHook(CAPTURE_TURN, { cwd: projectDir, session_id: 't', last_assistant_message: 'response text' }, homeDir);
     expect(readJsonl(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toEqual([
-      { role: 'assistant', content: 'response text', ts: expect.any(Number) },
+      { role: 'assistant', content: 'response text', ts: expect.any(Number), session_id: 't' },
     ]);
     expect(readJsonl(path.join(projectDir, '.devflow', 'curation', '.pending-turns.jsonl'))).toEqual([
       { role: 'assistant', content: 'response text', ts: expect.any(Number) },
@@ -835,17 +835,44 @@ describe('capture-prompt + capture-turn integration', () => {
     fs.rmSync(homeDir, { recursive: true, force: true });
   });
 
-  it('user turn then assistant turn are appended in order to both queues', () => {
-    runHook(CAPTURE_PROMPT, { cwd: projectDir, session_id: 'integ', prompt: 'implement feature X' }, homeDir);
-    runHook(CAPTURE_TURN, { cwd: projectDir, session_id: 'integ', last_assistant_message: 'done' }, homeDir);
+  it('adds IDs in order only to memory, with one parse and one build per event', () => {
+    const jq = resolveOnPath('jq', process.env.PATH ?? '/usr/bin:/bin');
+    expect(jq, 'the process count uses the jq backend').toBeDefined();
+    const calls = path.join(homeDir, 'json-calls');
+    writeFakeExecutable(path.join(homeDir, 'jq'), `#!/bin/bash\necho jq >> "${calls}"\nexec "${jq}" "$@"\n`);
+    const env = { PATH: `${homeDir}:${process.env.PATH ?? '/usr/bin:/bin'}` };
+    const prompt = 'implement\tfeature\x01X';
 
-    for (const queue of ['memory', 'curation'] as const) {
-      const rows = readJsonl(path.join(projectDir, '.devflow', queue, '.pending-turns.jsonl'));
-      expect(rows).toEqual([
-        { role: 'user', content: 'implement feature X', ts: expect.any(Number) },
-        { role: 'assistant', content: 'done', ts: expect.any(Number) },
+    expect(runHook(CAPTURE_PROMPT, { cwd: projectDir, session_id: 'A_1', prompt }, homeDir, env).exitCode).toBe(0);
+    expect(fs.readFileSync(calls, 'utf-8')).toBe('jq\n'.repeat(2));
+    expect(runHook(CAPTURE_TURN, { cwd: projectDir, session_id: 'B-2', last_assistant_message: 'done' }, homeDir, env).exitCode).toBe(0);
+    expect(fs.readFileSync(calls, 'utf-8')).toBe('jq\n'.repeat(4));
+
+    const user = { role: 'user', content: prompt, ts: expect.any(Number) };
+    const assistant = { role: 'assistant', content: 'done', ts: expect.any(Number) };
+    expect(readJsonl(path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl'))).toEqual([
+      { ...user, session_id: 'A_1' }, { ...assistant, session_id: 'B-2' },
+    ]);
+    expect(readJsonl(path.join(projectDir, '.devflow', 'curation', '.pending-turns.jsonl'))).toEqual([user, assistant]);
+  });
+
+  it.each([
+    [CAPTURE_PROMPT, 'prompt', 'user', { unused: 'sample-id' }],
+    [CAPTURE_TURN, 'last_assistant_message', 'assistant', 'sample-id\n'],
+  ] as const)('captures without the invalid ID and logs only a fixed message for %s', (hook, field, role, session_id) => {
+    const result = runHook(hook, { cwd: projectDir, session_id, [field]: 'text' }, homeDir);
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    for (const queue of ['memory', 'curation']) {
+      expect(readJsonl(path.join(projectDir, '.devflow', queue, '.pending-turns.jsonl'))).toEqual([
+        { role, content: 'text', ts: expect.any(Number) },
       ]);
     }
+    const log = fs.readFileSync(workerLogPath(projectDir, homeDir, path.basename(hook)), 'utf-8');
+    expect(log.split('\n').filter((line) => line.includes('session_id'))).toEqual([
+      expect.stringMatching(/\] Capture: no valid session_id$/),
+    ]);
+    expect(log).not.toContain('sample-id');
   });
 });
 

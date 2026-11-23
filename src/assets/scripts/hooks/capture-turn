@@ -6,7 +6,7 @@
 # 120s-throttle/nohup-spawn block lives in memory-worker, a separate Stop
 # hook that Claude Code runs in parallel with this one; the worker tolerates a
 # queue this hook has not appended to yet (D-QUEUE-NO-ORPHAN-DELETE).
-# This hook never spawns a process (AC-F5).
+# This hook does not start the memory worker (AC-F5).
 
 # Safe no-op fallback: must exist before set -e and before hook-bootstrap is sourced.
 dbg() { :; }
@@ -26,11 +26,11 @@ if [ "$_JSON_AVAILABLE" = "false" ]; then dbg "EXIT: no json"; exit 0; fi
 INPUT=$(cat)
 dbg "INPUT length=${#INPUT}"
 
-# Resolve project directory and assistant response in one subprocess via the
-# shared json_extract_cwd_field helper (json-parse) -- keeps the SOH delimiter
-# and jq/node fallback pair defined in exactly one place, shared with capture-prompt.
-_FIELDS=$(printf '%s' "$INPUT" | json_extract_cwd_field "last_assistant_message") || { dbg "EXIT: extraction failed"; exit 0; }
+# Read the directory, session ID and response in one parser call.
+_FIELDS=$(printf '%s' "$INPUT" | json_extract_cwd_sid_field "last_assistant_message") || { dbg "EXIT: extraction failed"; exit 0; }
 CWD="${_FIELDS%%$'\001'*}"
+_FIELDS="${_FIELDS#*$'\001'}"
+SESSION_ID="${_FIELDS%%$'\001'*}"
 ASSISTANT_MSG="${_FIELDS#*$'\001'}"
 
 if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then dbg "EXIT: bad CWD"; exit 0; fi
@@ -91,14 +91,18 @@ source "$SCRIPT_DIR/get-mtime" || { echo "capture-turn: failed to source get-mti
 source "$SCRIPT_DIR/curation-lock" || { echo "capture-turn: failed to source curation-lock" >&2; exit 1; }
 
 # Each queue is checked from the root it lies below, and its folder created there,
-# by queue_append_row (D-HOOKS-NO-SYMLINK, git-marker).
+# by queue_append_both (D-HOOKS-NO-SYMLINK, git-marker).
 TS=$(date +%s)
 queue_append_both \
   "$PROJECT_ROOT" "$MEMORY_DIR/.pending-turns.jsonl" \
   "$LEDGER_ROOT" "$CURATION_DIR/.pending-turns.jsonl" \
   "$MEMORY_ENABLED" "$CURATION_ENABLED" \
-  "assistant" "$ASSISTANT_MSG" "$TS"
+  "assistant" "$ASSISTANT_MSG" "$TS" "$SESSION_ID"
 
-log "Captured assistant turn (${#ASSISTANT_MSG} chars)"
+if [ -z "$SESSION_ID" ]; then
+  log "Capture: no valid session_id"
+else
+  log "Captured assistant turn (${#ASSISTANT_MSG} chars)"
+fi
 dbg "=== HOOK COMPLETE ==="
 exit 0
