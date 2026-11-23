@@ -16,7 +16,7 @@ updated: 2026-11-23
 - **KB-INV-2** All I/O happens in the gather step of `src/hud/index.ts`. A component is `(ctx) => Promise<ComponentResult | null>` and reads only `ctx`; `null` hides it.
 - **KB-INV-3** A new component needs a `ComponentId` in `types.ts`, an entry in `COMPONENT_MAP` and in `LINE_GROUPS` in `render.ts`, and an entry in `HUD_COMPONENTS` in `config.ts` only if it is on by default.
 - **KB-INV-4** `render` drops a component that throws or rejects and prints the others. If `run` fails or the `OVERALL_TIMEOUT` timer fires, `main` prints nothing.
-- **KB-INV-5** `weekForecastFrom` is a copy of the `forecastFrom` formula of the pinned tokenmeter release. The contract test in `tests/tokenmeter-contract.test.ts` runs the pinned `tokenmeter statusline` and compares percent and run-out hours with the HUD.
+- **KB-INV-5** `weekForecastFrom` is a copy of the `forecastFrom` formula of the pinned tokenmeter release. The contract test in `tests/tokenmeter-contract.test.ts` has two parts. One part imports the package `forecastFrom` (test only) and compares the at-reset percent and the run-out timestamp with `weekForecastFrom` at a fixed time on an edge table. The other part runs the pinned `tokenmeter statusline` and compares percent and run-out hours with the HUD.
 - **KB-INV-6** The week forecast reads the raw `rate_limits.seven_day` from stdin through `parseWeekPoint`, not `ctx.usage`. Any invalid input gives output byte for byte equal to the output with the forecast off.
 - **KB-INV-7** Codex quota comes only through `src/hud/tokenmeter.ts`: it runs the verified local tokenmeter binary read from install state, with no shell, no HUD stdin, an allowlisted env, a byte cap, a deadline and a cache.
 - **KB-INV-8** `HudConfig` has three fields (`enabled`, `detail`, `forecast`). `loadConfig` builds the object from these known keys only. `detail` and `forecast` are on only for a strict `true`; `enabled` is off only for a strict `false`.
@@ -58,12 +58,14 @@ Two components are outside the default list:
 `weekForecast` shows `→ N% by reset` and, when the quota runs out before the reset, `, runs out in <time>`. It sits between `7d` and the Codex quota on the capacity line.
 
 - `parseWeekPoint` accepts a value from 0 to 100 and a `resets_at` in epoch seconds that is in the future and within `MAX_RESET_AHEAD_MS`. A reset in milliseconds fails this check.
-- `weekForecastFrom` returns `null` until `BURN_FREE_FRACTION` of the week has passed. The burn rate is used percent per elapsed hour. The test `starts the forecast at exactly 5 hours and 144 seconds elapsed` in `tests/hud-components.test.ts` pins the start.
+- `weekForecastFrom` checks its own precondition: it returns `null` unless the reset is after `nowMs`, and then until `BURN_FREE_FRACTION` of the week has passed. The burn rate is used percent per elapsed hour. The test `starts the forecast at exactly 5 hours and 144 seconds elapsed` in `tests/hud-components.test.ts` pins the start.
 - `forecastPercentText` shows `>999%` above 999.
 - The installed HUD cannot import the tokenmeter package, and a devflow-only user has no stored Claude data. So the formula is a copy, and the contract test is the only link between the copy and the package.
 - The guard test also checks the import list of `week-forecast.ts` and that `index.ts` has no `forecast` text. The component adds no gather step.
 
-When the tokenmeter dependency pin changes, run `tests/tokenmeter-contract.test.ts` first. If it fails, update `weekForecastFrom` to match the new formula. Do not change the contract test to match the copy.
+The edge table in the contract test covers the cases where a copy drifts: one millisecond before and at the start limit, 0% and 100% used, run-out at the reset, and run-out just after it. Each case first requires that the HUD parser accepts the reading, so an empty comparison cannot pass. A CLI case reaches the `>999%` cap through the real binary.
+
+When the tokenmeter dependency pin changes, run `tests/tokenmeter-contract.test.ts` first. If it fails, update `weekForecastFrom` to match the new formula. Do not change the contract test to match the copy. The test does not cover the pinned formula in full, so re-read `forecastFrom` at each bump and add an edge case for each new branch.
 
 ## Codex quota
 
@@ -127,7 +129,7 @@ Two places in `init.ts` save the config: the `--hud-only` path and the full init
 - `src/hud/transcript.ts`: transcript parser for todos, tools and agents.
 - `src/cli/commands/hud.ts`: `devflow hud`, statusLine ownership, add and remove.
 - `src/cli/commands/init.ts`: the two `hud.json` saves.
-- `tests/tokenmeter-contract.test.ts`: forecast contract with the pinned tokenmeter.
+- `tests/tokenmeter-contract.test.ts`: forecast contract with the pinned tokenmeter (package `forecastFrom` edge table and CLI cases).
 - `tests/guards/hud-usage-source.test.ts`: source and docs guard.
 - `tests/hud-installed-layout.test.ts`: HUD run from a composed install.
 - `tests/hud-render.test.ts`, `tests/hud-components.test.ts`, `tests/hud.test.ts`: render, component and command tests.
