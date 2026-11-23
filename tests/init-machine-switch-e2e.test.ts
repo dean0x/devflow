@@ -28,7 +28,8 @@ import * as os from 'os';
 import * as path from 'path';
 import { requireBuiltCli, sandboxEnv } from './helpers.js';
 import { systemManagedSettingsAtRisk } from './helpers/managed-settings.js';
-import { hasMemoryHooks } from '../src/cli/commands/memory.js';
+import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
+import { countMemoryHooks, hasMemoryHooks } from '../src/cli/commands/memory.js';
 import { hasAmbientHook } from '../src/cli/commands/ambient.js';
 import { hasHudStatusLine } from '../src/cli/commands/hud.js';
 import { addProxyHooks, applyProxyEnv, hasProxyHooks } from '../src/cli/commands/proxy.js';
@@ -37,6 +38,7 @@ import { DEVFLOW_HISTORICAL_DENY } from '../src/targets/claude-code/post-install
 import type { Settings } from '../src/targets/claude-code/hooks.js';
 
 const CLI = requireBuiltCli();
+const writeFakeExecutable = useWarmFakeExecutables();
 
 /** One CLI spawn under load runs well past vitest's 5 s default. */
 const SUBPROCESS_TIMEOUT_MS = 60_000;
@@ -51,13 +53,15 @@ let nonGit: string;
 const devflowDir = (): string => path.join(tmpHome, '.devflow');
 const claudeDir = (): string => path.join(tmpHome, '.claude');
 const installedHook = (name: string): string => path.join(devflowDir(), 'scripts', 'hooks', name);
+const fakeBin = (): string => path.join(tmpHome, 'bin');
+const childEnv = (): NodeJS.ProcessEnv => sandboxEnv(tmpHome, { PATH: `${fakeBin()}${path.delimiter}${process.env.PATH ?? ''}` });
 
 function runCli(cwd: string, ...args: string[]): { status: number | null; out: string } {
   const result = spawnSync('node', [CLI, ...args], {
     encoding: 'utf-8',
     timeout: SUBPROCESS_TIMEOUT_MS,
     cwd,
-    env: sandboxEnv(tmpHome),
+    env: childEnv(),
   });
   if (result.error) throw result.error;
   return { status: result.status, out: `${result.stdout ?? ''}${result.stderr ?? ''}` };
@@ -76,7 +80,7 @@ function runInstalledHook(name: string, input: object): { stdout: string; exitCo
   try {
     const stdout = execFileSync('bash', [hook], {
       input: JSON.stringify(input),
-      env: sandboxEnv(tmpHome),
+      env: childEnv(),
       stdio: ['pipe', 'pipe', 'pipe'],
     }).toString();
     return { stdout, exitCode: 0 };
@@ -144,10 +148,12 @@ beforeEach(async () => {
   repoA = await fs.mkdtemp(path.join(os.tmpdir(), 'df-switch-repoA-'));
   repoB = await fs.mkdtemp(path.join(os.tmpdir(), 'df-switch-repoB-'));
   nonGit = await fs.mkdtemp(path.join(os.tmpdir(), 'df-switch-nongit-'));
-  // init bails with "Claude Code not detected" without a ~/.claude dir
+  // Init needs a Claude Code config directory. The stub permits no model run.
   await fs.mkdir(claudeDir(), { recursive: true });
-  execFileSync('git', ['init', '-q'], { cwd: repoA });
-  execFileSync('git', ['init', '-q'], { cwd: repoB });
+  await fs.mkdir(fakeBin(), { recursive: true });
+  writeFakeExecutable(path.join(fakeBin(), 'claude'), '#!/bin/bash\nif [ "$1" = --version ]; then printf "2.1.0 (Claude Code)\\n"; else exit 1; fi\n');
+  execFileSync('git', ['init', '-q'], { cwd: repoA, env: childEnv() });
+  execFileSync('git', ['init', '-q'], { cwd: repoB, env: childEnv() });
 });
 
 afterEach(async () => {
@@ -260,7 +266,7 @@ describe('init --no-<feature> switches the feature off in every project', () => 
   }, MULTI_RUN_TIMEOUT_MS);
 
   it('a stale repo config saying false switches nothing off, and init drops it', async () => {
-    runInit(repoA, '--recommended');
+    runInit(repoA, '--recommended', '--memory');
     await writeRepoConfig(repoB, { ...STALE_OFF, tracker: 'jira' });
 
     // Every feature is on for repo B: the stale per-repo false decides nothing.
@@ -322,8 +328,15 @@ describe('devflow memory|curation|knowledge --enable/--disable are machine-wide'
     expect(JSON.parse(await readSettings())).toEqual(JSON.parse(viaCommand));
   }, MULTI_RUN_TIMEOUT_MS);
 
-  it('memory --enable registers the hooks after capture-turn (the position init uses) and resumes capture', async () => {
-    runInit(repoA, '--recommended', '--no-memory');
+  it('a fresh recommended install records memory off and registers no memory hooks', async () => {
+    runInit(repoA, '--recommended');
+
+    expect(await readManifestFeatures()).toMatchObject({ memory: false });
+    expect(countMemoryHooks(await readSettings())).toBe(0);
+  }, MULTI_RUN_TIMEOUT_MS);
+
+  it('memory --enable after a fresh install registers the worker after capture-turn and starts capture', async () => {
+    runInit(repoA, '--recommended');
 
     const enabled = runCli(nonGit, 'memory', '--enable');
     expect(enabled.status, enabled.out).toBe(0);
@@ -418,6 +431,18 @@ async function editManifestVersion(version: string): Promise<void> {
 }
 
 describe('older manifests agree with the runtime gates', () => {
+  it('re-init records an absent memory switch as on and retains other switches', async () => {
+    runInit(repoA, '--recommended', '--no-knowledge');
+    await editManifestFeatures(['memory']);
+    captureTurn(repoB);
+    expect(linesOf(memoryQueue(repoB))).toBe(2);
+
+    runInit(repoA, '--recommended');
+
+    expect(await readManifestFeatures()).toMatchObject({ memory: true, knowledge: false });
+    expect(hasMemoryHooks(await readSettings())).toBe(true);
+  }, MULTI_RUN_TIMEOUT_MS);
+
   it('a manifest without the curation key, the legacy learning key and the knowledge key: a plain re-init keeps both enabled (D-FEATURES-ABSENT-ON)', async () => {
     runInit(repoA, '--recommended');
     await editManifestFeatures(['curation', 'learning', 'knowledge']);
@@ -433,7 +458,7 @@ describe('older manifests agree with the runtime gates', () => {
   }, MULTI_RUN_TIMEOUT_MS);
 
   it('a manifest holding only the legacy decisions:false: curation is off in the hooks and the CLI status (D-LEARNING-LEGACY-DECISIONS)', async () => {
-    runInit(repoA, '--recommended');
+    runInit(repoA, '--recommended', '--memory');
     await editManifestFeatures(['curation', 'learning'], { decisions: false });
     await seedCurationQueue(repoB);
 

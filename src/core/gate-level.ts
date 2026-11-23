@@ -194,6 +194,7 @@ async function readManifestBytes(manifestPath: string): Promise<Buffer | 'absent
  * strips a leading BOM, and then parse as JSON, so the level is read past a BOM
  * as it is in the resolver. A file with a BOM is still `rejected`, because
  * readManifest() parses the text as read and refuses it.
+ * A missing `memory` key also yields `rejected` here, but readManifest() heals it.
  */
 export async function readGateManifest(devflowDir: string): Promise<GateManifestRead> {
   const bytes = await readManifestBytes(path.join(devflowDir, 'manifest.json'));
