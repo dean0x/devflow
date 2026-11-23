@@ -309,7 +309,10 @@ exec /bin/rm "$@"
     expect(stamp()).toMatch(new RegExp(` session: ${A} -->$`));
     expect(startContext()).not.toContain('more than one session');
 
-    expect(runQueue([row('assistant', 'Other reply', B)]).log).toContain(MIXED_LOG);
+    const second = runQueue([row('assistant', 'Other reply', B)]);
+    expect(second.log).toContain(MIXED_LOG);
+    expect(second.prompt).not.toContain(A);
+    expect(second.prompt).not.toContain(B);
     expect(stamp()).toMatch(new RegExp(` session: ${B} multi: \\d+ -->$`));
     expect(startContext().split('\n')[0]).toContain('more than one session');
   }, budget);
