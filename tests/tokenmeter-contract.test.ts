@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, sep } from 'node:path';
+import { forecastFrom } from '@dean0x/tokenmeter/dist/analysis.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installTokenmeterState, resolvePackageBin } from '../src/core/tokenmeter-bin.js';
 import { forecastPercentText, parseWeekPoint, weekForecastFrom } from '../src/hud/components/week-forecast.js';
@@ -113,11 +114,34 @@ describe.skipIf(process.platform === 'win32')('pinned tokenmeter HUD contract', 
 
 describe.skipIf(process.platform === 'win32')('pinned tokenmeter week forecast contract', { timeout: TEST_TIMEOUT_MS }, () => {
   const hourMs = 3_600_000;
+  const nowMs = 1_800_000_000_000;
+  const startLimitReset = nowMs + 163 * hourMs - 144_000;
+  const midweekReset = nowMs + 84 * hourMs;
+
+  it.each([
+    ['one millisecond before the start limit', 1, startLimitReset, nowMs - 1],
+    ['at the start limit', 1, startLimitReset, nowMs],
+    ['at 0% used', 0, midweekReset, nowMs],
+    ['at 100% used', 100, midweekReset, nowMs],
+    ['with run-out at reset', 50, midweekReset, nowMs],
+    // Run-out is less than half a millisecond after reset, before rounding.
+    ['with run-out just after reset', 49.99999998, midweekReset, nowMs],
+  ] as const)('matches the tokenmeter forecast values %s', (_label, usedPercent, resetsAtMs, at) => {
+    const point = parseWeekPoint({ used_percentage: usedPercent, resets_at: resetsAtMs / 1000 }, at);
+    assert(point, 'The HUD must accept the week reading');
+    const upstream: { atResetPct: number; runsOutAt: number | null } | null =
+      forecastFrom({ usedPercent, resetsAt: resetsAtMs, at });
+    expect(weekForecastFrom(point, at)).toEqual(upstream && {
+      atResetPct: upstream.atResetPct,
+      runsOutAtMs: upstream.runsOutAt,
+    });
+  });
 
   it.each([
     ['with no run-out', 40, 84, ' | 80% by reset'],
     ['with a run-out', 80, 82, ' | 156% by reset, runs out in 21h'],
     ['two hours into the week', 40, 166, ''],
+    ['above the display cap', 60, 158, ' | >999% by reset, runs out in 6h'],
   ] as const)('matches the HUD forecast %s', async (_label, percent, hoursLeft, expectedSuffix) => {
     const bin = await resolvePackageBin('@dean0x/tokenmeter', 'tokenmeter');
     if (!bin.ok) assert.fail(bin.error);
