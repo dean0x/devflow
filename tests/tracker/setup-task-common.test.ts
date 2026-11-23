@@ -262,7 +262,13 @@ function runRecipe(recipe: string, body: string): { status: number | null; crite
 const RETIRED_RECIPE =
   `CRITERIA=$(echo "$BODY" | sed -n '/## Acceptance Criteria/,/^##/p' | grep -E '^\\s*-\\s*\\[' || true)`
 
+/** The level-2-only recipe #808 replaced — a known-bad sample for `###` headings. */
+const LEVEL_2_ONLY_RECIPE =
+  `CRITERIA=$(printf '%s\\n' "$BODY" | tr -d '\\r' | awk 'tolower($0) ~ /^##[[:blank:]]*acceptance criteria:?[[:blank:]]*$/ {f=1; next} /^##[[:blank:]]/ {f=0} f' | grep -E '^[[:space:]]*([-*]|[0-9]+[.)])[[:space:]]+[^[:space:]]' || true)`
+
 const NUMBERED_LOWERCASE = '## acceptance criteria:\n1. first item\n2) second item\n\n## Notes\n- [ ] not a criterion\n'
+
+const LEVEL_3 = '### Cause\nText.\n\n### Acceptance criteria\n\n- [ ] AC-1: one\n- [ ] AC-2: two\n'
 
 describe('fetch-issue: the acceptance-criteria recipe, executed', () => {
   const recipe = collectCriteriaRecipe(requireRef('tracker/github/fetch-issue.md'))
@@ -282,6 +288,14 @@ describe('fetch-issue: the acceptance-criteria recipe, executed', () => {
     },
     { label: 'CRLF line endings', body: '## Acceptance Criteria\r\n- [ ] one\r\n- two\r\n', expected: '- [ ] one\n- two' },
     { label: 'no heading', body: 'Nothing here\n- [ ] stray\n', expected: '' },
+    { label: 'a ### heading starts the section', body: LEVEL_3, expected: '- [ ] AC-1: one\n- [ ] AC-2: two' },
+    {
+      label: 'a #### heading with a colon, a nested ##### stays inside, a following ### ends it',
+      body: '#### acceptance criteria:\n- a\n##### Detail\n- b\n### Notes\n- [ ] c\n',
+      expected: '- a\n- b',
+    },
+    { label: 'a higher-level # heading ends a ### section', body: '### Acceptance criteria\n- a\n# Top\n- c\n', expected: '- a' },
+    { label: 'a # or ##### heading starts no section', body: '# Acceptance criteria\n- a\n##### Acceptance criteria\n- b\n', expected: '' },
   ]
 
   for (const { label, body, expected } of cases) {
@@ -294,6 +308,7 @@ describe('fetch-issue: the acceptance-criteria recipe, executed', () => {
 
   it('known-bad probe: the retired recipe misses the numbered, lowercase section', () => {
     expect(runRecipe(RETIRED_RECIPE, NUMBERED_LOWERCASE).criteria).toBe('')
+    expect(runRecipe(LEVEL_2_ONLY_RECIPE, LEVEL_3).criteria).toBe('')
     expect(collectCriteriaRecipe('BODY=$(x)\n# nothing\n')).toBeNull()
   })
 })
