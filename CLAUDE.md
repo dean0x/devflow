@@ -145,7 +145,7 @@ For detailed specifications beyond this overview:
 - **Skills architecture**: `docs/reference/skills-architecture.md` — tier catalog, templates, creation guide, activation patterns
 - **Agent design**: `docs/reference/agent-design.md` — templates, anti-patterns, quality checklist
 - **Adding commands**: `docs/reference/adding-commands.md` — command template, plugin registration
-- **Release process**: `docs/reference/release-process.md` — a release PR sets the version and the CHANGELOG, then a `vX.Y.Z` tag push publishes to npm through npm trusted publishing
+- **Release process**: `docs/reference/release-process.md` — a release PR, then a `vX.Y.Z` tag push (npm trusted publishing)
 - **File organization**: `docs/reference/file-organization.md` — source tree, build distribution, install paths, settings
 - **Docs framework skill**: `src/assets/skills/docs-framework/SKILL.md` — doc naming and templates
 - **Platform assumptions**: `docs/reference/platform-assumptions.md` — Claude Code behaviour that devflow agents and tests rely on, each with a date stamp and a drift symptom
