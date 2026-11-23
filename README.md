@@ -58,7 +58,7 @@ This is the **orchestrated flow** — you stay in the loop between every step. W
 
 **Up to 20 parallel Review agents.** Security, architecture, performance, complexity, consistency, regression, testing, and more. Each produces findings with severity, confidence scoring, and concrete fixes. Conditional Review agents activate when relevant (language focuses such as TypeScript for `.ts` files, database for schema changes, compliance when regulated surface detected in the diff). The gate level narrows these sets: the default `standard` level drops the TypeScript focus, and `lean` runs fewer focuses still. Every finding gets validated and resolved automatically.
 
-**Memory that persists.** Session context survives restarts, `/clear`, and context compaction. Your agent picks up exactly where it left off.
+**Working memory is off by default.** Run `devflow memory --enable` to keep a short note across restarts, `/clear`, and context compaction. The note has a limit of 8 KB (8,192 bytes). Use one worktree for each parallel session.
 
 **Decisions and pitfalls.** A background agent detects architectural decisions and known pitfalls from your session dialogs and writes them to `.devflow/curation/decisions.md` and `.devflow/curation/pitfalls.md` — informing every future review and implementation session without any manual bookkeeping.
 
@@ -104,7 +104,9 @@ After an upgrade, run `devflow init` again. See the [HUD reference](https://gith
 npx devflow-kit init
 ```
 
-That's it. The interactive wizard offers Recommended defaults or an Advanced flow — plugin selection, feature configuration, compliance frameworks, the gate level, and security settings. Ambient mode, working memory, and curation are on by default. Non-interactive: `npx devflow-kit init --recommended`.
+The interactive wizard offers Recommended defaults or an Advanced flow with more options. On new installs, ambient mode and curation are on by default. Working memory is off. A standard re-init keeps your memory choice. `devflow init --reset` restores the off default.
+
+For non-interactive setup, run `npx devflow-kit init --recommended`.
 
 ## Privacy & Sharing
 

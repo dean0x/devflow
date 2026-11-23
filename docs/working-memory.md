@@ -1,25 +1,37 @@
 # Working Memory
 
-Devflow automatically preserves session context across restarts, `/clear`, and context compaction — zero ceremony required.
+Working memory keeps a short note across restarts, `/clear`, and context compaction.
+Working memory is off by default on new installs.
 
 ## How it works
 
-A capture/spawn split across always-on hooks plus one detached worker run behind the scenes:
-
 | Hook / Worker | When | What |
 |---------------|------|------|
-| **Stop** (`capture-turn`) | After each response | Appends the assistant turn to `.pending-turns.jsonl` (and, independently gated, to the sibling curation queue — see the Curation Pipeline section of `docs/reference/hooks.md`). Never spawns anything. |
-| **Stop** (`memory-worker`, run in parallel with `capture-turn`) | After each response | After the 120s throttle (keyed by `.working-memory-last-trigger` mtime), touches `.working-memory-last-trigger` then spawns `background-memory-update` as a detached `nohup` worker, a `claude -p` run on `agents.memory` (default `claude-sonnet-5-5`, high effort; `devflow agents` overrides it). |
-| **`background-memory-update`** (detached worker spawned by `memory-worker`) | Triggered by `memory-worker` after throttle expires | Drains `.pending-turns.jsonl` → renames to `.pending-turns.processing` (atomic claim) → snapshots `WORKING-MEMORY.md` checksum (PRE_RUN_CKSUM; "ABSENT" sentinel when file is missing) → calls `claude -p` (prompt on stdin — never naming the real file path) with a reconciliation-aware prompt (bounded git evidence since last stamp, reconciliation/expiry guidance, DONE definition) → model writes to `WORKING-MEMORY.md.new` only. **CAS verify-and-swap**: re-checksums `WORKING-MEMORY.md`; if unchanged (`PRE == POST`) and staged file exists and is stamped: renames `.new` → `WORKING-MEMORY.md` (UPDATED), removes `.processing`, touches `.last-refresh-ok`. If `WORKING-MEMORY.md` changed during the run (human edit): CONFLICT path — keeps human's version, discards `.new`, leaves `.processing` for retry on next run. If staged file absent or un-stamped: FAIL path — leaves `.processing` for crash recovery at next SessionStart. A queue holding only user rows (the worker can run before `capture-turn` appends the response, since Claude Code runs a Stop event's hooks in parallel) is left in place with no LLM run; the next run takes the whole turn. ms-scale TOCTOU between the pre-run read and the post-run CAS is accepted; the CAS catches mid-run clobber precisely because it verifies the baseline before swapping. |
-| **SessionStart** (`session-start-memory`) | On startup, `/clear`, resume, compaction | Reads the already-fresh `WORKING-MEMORY.md` and injects it as `additionalContext` with a git-reconciled header. Uses the `<!-- memory-head: <sha> branch: <name> -->` stamp on line 1 to determine state: **A** in-sync (stamp SHA = HEAD), **B** drifted (stamp SHA is an ancestor of HEAD — shows commits since last write), or **C** refresh-failing banner (queue non-empty AND `.last-refresh-ok` missing or >600s old; State C queue depth counts both `.pending-turns.jsonl` lines and any orphaned `.pending-turns.processing` lines). Also recovers an orphaned `.pending-turns.processing` itself (self-contained cold path — no external helper dependency). |
-| **SessionStart** (`session-start-context`) | On startup, `/clear`, resume, compaction | Injects the decisions TL;DR and, when the curation queue has pending turns, the Curation maintenance directive (spawns the background Curate agent). On compaction it adds a one-line directive to re-read the running devflow command from the current phase, and on any start it may show a CLAUDE.md import finding to the user in a `systemMessage` (never in the model's context). |
-| **PreCompact** | Before context compaction | Backs up Git state to `backup.json`, without copying working memory. When WORKING-MEMORY.md is absent, bootstraps it with a `<!-- memory-head: <40-hex sha> branch: <name> -->` stamp on line 1 and the five canonical sections; requires a 40-hex HEAD sha, so an unborn branch skips bootstrap while a detached HEAD uses `branch: (detached)`. An existing file is never re-stamped here. |
+| `capture-prompt`, `capture-turn`, `capture-question` | On a prompt, response, or answered question | Add rows to the memory queue when memory is on. Each memory row carries the session ID when it is available. The curation queue has its own switch. |
+| `memory-worker` | After each response, in parallel with `capture-turn` | Starts the detached `background-memory-update` worker after the 120-second throttle expires. |
+| `background-memory-update` | When `memory-worker` starts it | Claims a batch under the queue lock. Pairs prompts and replies within the same session. Runs `claude -p` on `agents.memory` (default `claude-sonnet-5-5`, high effort). Use `devflow agents` to change the model or effort. |
+| `session-start-memory` | On startup, `/clear`, resume, and compaction | Adds the current note to `additionalContext` with a header that shows its Git state. Recovers orphaned batches. |
+| `pre-compact-memory` | Before context compaction | Saves Git state to `backup.json`. If there is a HEAD commit and no note, creates a note with a stamp and two sections. For a detached HEAD, the stamp uses `branch: (detached)`. |
 
-Working memory is **per-project** — scoped to each repo's `.devflow/` directory. Multiple sessions across different repos don't interfere.
+If the queue has only user rows, the worker keeps them for the next run and does not call the model.
+The prompt keeps each data block separate. The model writes to `WORKING-MEMORY.md.new`.
+The worker adds the Git stamp to a copy and checks its size and section headings.
+If the note checksum still matches, the worker puts the checked copy in place and records the successful refresh.
+If the checksum differs, the worker keeps the current note and the batch.
 
-SessionStart restores only the current `WORKING-MEMORY.md`. It does not read or inject legacy `memory_snapshot` fields from `backup.json`, even when current memory is missing. Existing backup files are left in place; the next PreCompact writes Git evidence only. Pending-turn recovery and the background memory updater are unchanged.
+The note has a limit of 8 KB (8,192 bytes), including the stamp.
+If a note on disk exceeds the limit, SessionStart skips it. The next successful update replaces it.
+SessionStart restores the note only from `WORKING-MEMORY.md`. It can show a refresh warning even when it skips the note.
+For the header states and worker notices, see [Working Memory hooks](reference/hooks.md#working-memory).
+
+Use one worktree for each parallel session. All sessions in the same worktree share one note and one memory queue.
+If rows with different session IDs interleave in one batch, the note header says it holds more than one session.
+The header shows this advice for four hours after the last interleave. The worker does not mark interleaves across batches.
 
 ## Enable / Disable
+
+A standard re-init keeps the recorded choice. Devflow records memory as on for an existing install with no memory setting.
+`devflow init --reset` restores the off default. Use `--memory` to turn it on at init.
 
 ```bash
 npx devflow-kit init --memory          # Enable during install
@@ -36,36 +48,33 @@ devflow memory --status                # Check current state
 ```
 .devflow/
 ├── memory/
-│   ├── WORKING-MEMORY.md             # Auto-maintained by background-memory-update worker (claude -p on agents.memory: default claude-sonnet-5-5, high effort; override with devflow agents)
-│   │                                 # Line 1: <!-- memory-head: <sha> branch: <name> -->
-│   ├── WORKING-MEMORY.md.new         # Staged file: model writes here; CAS renames to WORKING-MEMORY.md on success (transient)
-│   ├── backup.json                   # Pre-compact git state snapshot (plain JSON — no stamp)
-│   ├── .pending-turns.jsonl          # Queue of captured user/assistant turns (JSONL, ephemeral)
-│   ├── .pending-turns.processing     # Atomic handoff during background processing (transient)
-│   │                                 # CONFLICT path leaves .processing for retry; FAIL path leaves for crash recovery
-│   ├── .working-memory-last-trigger  # Mtime-keyed throttle for worker spawning (120s)
-│   └── .last-refresh-ok              # Touched on successful CAS swap (State C detection)
+│   ├── WORKING-MEMORY.md              # Current note (8,192 bytes max)
+│   │                                 # Line 1: Git stamp, with an optional multi-session mark
+│   ├── WORKING-MEMORY.md.new          # Model output (temporary)
+│   ├── .WORKING-MEMORY.md.swap        # Copy for the stamp and format checks (temporary)
+│   ├── backup.json                    # Git state before compaction
+│   ├── .pending-turns.jsonl           # Queue of turns and answered questions (JSONL)
+│   ├── .pending-turns.processing     # Batch the worker claims from the queue
+│   ├── .working-memory-last-trigger  # Worker throttle (120 seconds)
+│   └── .last-refresh-ok               # Time of the last successful update
 └── curation/
     ├── decisions.md              # Architectural decisions (ADR-NNN), rendered from the curation ledger
     ├── pitfalls.md               # Known pitfalls (PF-NNN, area-specific gotchas), rendered from the curation ledger
     └── index.md                  # Compact index of the active entries, read by workflow commands
 ```
 
-Note: no marker files are involved anywhere in this flow — memory refresh is handled entirely by the queue + detached Stop-hook worker above. Decisions detection and maintenance use a separate queue at `.devflow/curation/.pending-turns.jsonl` and a background Curate agent the main model spawns on a SessionStart directive (see the Curation Pipeline section of `docs/reference/hooks.md`).
+Curation uses a separate queue at `.devflow/curation/.pending-turns.jsonl`. When work is pending, `session-start-context` asks the main model to start the Curate agent. See the [Curation Pipeline](reference/hooks.md#curation-pipeline).
 
 Debug logs are stored at `~/.devflow/logs/{project-slug}/`, capped at the 200 most recently written project folders.
 
 ## Working Memory Sections
 
-The `background-memory-update` worker (detached `claude -p` process spawned by `memory-worker`) maintains these sections in `WORKING-MEMORY.md`:
+`WORKING-MEMORY.md` has two level-two sections:
 
 | Section | Purpose |
 |---------|---------|
-| `## Now` | Current focus and immediate next steps |
-| `## Progress` | What's done, what remains, blockers |
-| `## Decisions` | Architectural and design decisions made this session |
-| `## Context` | Repository state, build status, test results |
-| `## Session Log` | Timestamped log of significant actions |
+| `## Now` | Current task and next steps |
+| `## Progress` | Completed work, work that remains, and problems that stop work |
 
 ## Long-term Knowledge
 

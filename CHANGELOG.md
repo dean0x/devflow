@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Parallel sessions.** Working memory pairs turns within each session. If turns from different sessions interleave in one batch, the note header flags the shared note for four hours. Use one worktree for each parallel session.
+
+### Changed
+
+- **Working memory is off by default.** Existing installs keep their choice. Use `devflow memory --enable` to turn it on. `devflow init --reset` restores the off default.
+- **Short memory note.** The note has a limit of 8 KB (8,192 bytes) and has two sections: `## Now` and `## Progress`. Session start skips notes above the limit. The worker prompt keeps each data block separate.
+
 ### Fixed
 
 - The GitHub issue fetch finds the acceptance criteria under a `##`, `###` or `####` heading. The section ends at the next heading of the same level or a higher level (#808).
