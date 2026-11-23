@@ -861,9 +861,19 @@ describe('capture-prompt + capture-turn integration', () => {
   });
 
   it.each([
+    ['NUL', '\x00'],
+    ['SOH', '\x01'],
+  ])('skips capture and exits cleanly if the prompt cwd contains %s', (_name, character) => {
+    const result = runHook(CAPTURE_PROMPT, { cwd: `${projectDir}${character}`, prompt: 'text' }, homeDir);
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect(fs.existsSync(path.join(projectDir, '.devflow'))).toBe(false);
+  });
+
+  it.each([
     [CAPTURE_PROMPT, 'prompt', 'user', { unused: 'sample-id' }],
     [CAPTURE_TURN, 'last_assistant_message', 'assistant', 'sample-id\n'],
-  ] as const)('captures without the invalid ID and logs only a fixed message for %s', (hook, field, role, session_id) => {
+  ] as const)('logs the captured turn and a fixed message for an invalid ID in %s', (hook, field, role, session_id) => {
     const result = runHook(hook, { cwd: projectDir, session_id, [field]: 'text' }, homeDir);
 
     expect(result.exitCode, result.stderr).toBe(0);
@@ -873,7 +883,8 @@ describe('capture-prompt + capture-turn integration', () => {
       ]);
     }
     const log = fs.readFileSync(workerLogPath(projectDir, homeDir, path.basename(hook)), 'utf-8');
-    expect(log.split('\n').filter((line) => line.includes('session_id'))).toEqual([
+    expect(log.split('\n').filter((line) => line.includes('Captured ') || line.includes('session_id'))).toEqual([
+      expect.stringContaining(`] Captured ${role} turn (4 chars)`),
       expect.stringMatching(/\] Capture: no valid session_id$/),
     ]);
     expect(log).not.toContain('sample-id');

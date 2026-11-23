@@ -99,10 +99,9 @@ queue_append_both \
   "$MEMORY_ENABLED" "$CURATION_ENABLED" \
   "assistant" "$ASSISTANT_MSG" "$TS" "$SESSION_ID"
 
+log "Captured assistant turn (${#ASSISTANT_MSG} chars)"
 if [ -z "$SESSION_ID" ]; then
   log "Capture: no valid session_id"
-else
-  log "Captured assistant turn (${#ASSISTANT_MSG} chars)"
 fi
 dbg "=== HOOK COMPLETE ==="
 exit 0

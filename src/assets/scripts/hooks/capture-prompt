@@ -26,7 +26,7 @@ if [ "$_JSON_AVAILABLE" = "false" ]; then dbg "EXIT: no json"; exit 0; fi
 
 INPUT=$(cat)
 
-FIELDS=$(printf '%s' "$INPUT" | json_extract_cwd_sid_field "prompt")
+FIELDS=$(printf '%s' "$INPUT" | json_extract_cwd_sid_field "prompt") || { dbg "EXIT: extraction failed"; exit 0; }
 CWD="${FIELDS%%$'\001'*}"
 FIELDS="${FIELDS#*$'\001'}"
 SESSION_ID="${FIELDS%%$'\001'*}"
@@ -95,10 +95,9 @@ queue_append_both \
   "$MEMORY_ENABLED" "$CURATION_ENABLED" \
   "user" "$PROMPT" "$TS" "$SESSION_ID"
 
+log "Captured user turn (${#PROMPT} chars)"
 if [ -z "$SESSION_ID" ]; then
   log "Capture: no valid session_id"
-else
-  log "Captured user turn (${#PROMPT} chars)"
 fi
 dbg "=== HOOK COMPLETE ==="
 exit 0
