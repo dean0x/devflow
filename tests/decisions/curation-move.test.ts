@@ -1667,12 +1667,14 @@ function captureThroughHook(queue: string, content: string, ts: number): void {
 
 describe('the queue rule — the merge cap (the size a capture trim keeps)', () => {
   it('equals the number of lines the capture trim keeps, and the trim still starts above 200', () => {
-    const queueAppend = read(path.join(HOOKS_DIR, 'queue-append'));
-    const keep = /tail -(\d+) "\$_qar_file"/.exec(queueAppend);
-    expect(keep, 'queue-append keeps the newest lines with tail').not.toBeNull();
-    expect(mover.QUEUE_MERGE_CAP_LINES).toBe(Number(keep?.[1]));
-    const triggers = [...queueAppend.matchAll(/"\$_qar_lines" -gt (\d+)/g)].map(match => Number(match[1]));
-    expect(triggers).toEqual([200, 200]);
+    const queue = path.join(site.newDir, QUEUE);
+    seedNew({ [QUEUE]: turns(1, 200) });
+
+    captureThroughHook(queue, 'at the limit', 200);
+    expect(linesOf(queue)).toHaveLength(200);
+
+    captureThroughHook(queue, 'above the limit', 201);
+    expect(linesOf(queue)).toHaveLength(mover.QUEUE_MERGE_CAP_LINES);
   });
 
   it('fills the pending queue to 100 lines and keeps the rest in an overflow file in the backup, dropping no row', () => {

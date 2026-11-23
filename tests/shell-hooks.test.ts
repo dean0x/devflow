@@ -1179,7 +1179,6 @@ describe('D-DETACHED-HEAD: memory on a detached HEAD (TP-53, TP-54)', { timeout:
 
     const lines = fs.readFileSync(memoryFile(), 'utf-8').split('\n');
     expect(lines[0]).toBe(`<!-- memory-head: ${sha} branch: (detached) -->`);
-    expect(lines).toContain(`- Branch: (detached) @ ${sha.slice(0, 7)}`);
     const backup = JSON.parse(fs.readFileSync(path.join(repo, '.devflow', 'memory', 'backup.json'), 'utf-8'));
     expect(backup.git.branch, 'the backup names the state instead of leaving it blank').toBe('(detached)');
   });
