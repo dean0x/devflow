@@ -7,6 +7,8 @@ import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
 import { gitIsolatedEnv, isolatedEnv } from './setup/home-isolation.js';
 import {
   answersVersion,
+  FIFO_RUN_BOUND_MS,
+  FIFO_TEST_TIMEOUT_MS,
   HOOK_RUN_ALLOWANCE_MS,
   HOOKS_DIR,
   makeFifo,
@@ -38,6 +40,23 @@ const SWAP = '.WORKING-MEMORY.md.swap';
 const ONCE = '.worker-note-once';
 const NOTICE = '.worker-notice-note';
 const MARKER = '0123456789abcdef';
+const UNBORN_STAMP = '<!-- memory-head: unknown branch: note-test -->';
+const MALFORMED_STAMPS = [
+  ['a non-digit mark', 'note-test multi: invalid-mark'],
+  ['extra stamp text', 'note-test extra-stamp-text'],
+  ['a branch above the stamp limit', 'b'.repeat(201)],
+] as const;
+
+function runBounded<T>(hook: string, run: (timeout: number) => T): T {
+  try {
+    return run(FIFO_RUN_BOUND_MS);
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ETIMEDOUT') {
+      throw new Error(`${path.basename(hook)} did not exit within ${FIFO_RUN_BOUND_MS} ms`, { cause: error });
+    }
+    throw error;
+  }
+}
 
 function nodeOnlyPath(binDir: string): string {
   for (const tool of FARM_TOOLS) {
@@ -98,6 +117,12 @@ ${afterWrite}
 `));
   }
 
+  function setShellUmask022(): void {
+    const umaskFile = path.join(root, 'umask');
+    fs.writeFileSync(umaskFile, 'umask 022\n');
+    env = { ...env, BASH_ENV: umaskFile };
+  }
+
   function runWorker(rows?: readonly string[]): { prompt: string; log: string } {
     const promptFile = path.join(root, 'prompt');
     const { PATH } = env;
@@ -107,10 +132,10 @@ ${afterWrite}
     if (rows) fs.writeFileSync(path.join(memoryDir, QUEUE), rows.join('\n') + '\n');
     fs.rmSync(promptFile, { force: true });
 
-    execFileSync('/bin/bash', [WORKER, project], {
+    runBounded(WORKER, (timeout) => execFileSync('/bin/bash', [WORKER, project], {
       env: { ...env, TEST_PROMPT: promptFile, TEST_MEMORY: memoryDir, TEST_ROOT: root },
-      stdio: 'ignore',
-    });
+      stdio: 'ignore', timeout,
+    }));
 
     const log = fs.readFileSync(path.join(home, '.devflow', 'logs', project.slice(1).replaceAll('/', '-'), '.background-memory-update.log'), 'utf8');
     return { log, prompt: fs.existsSync(promptFile) ? fs.readFileSync(promptFile, 'utf8') : '' };
@@ -357,11 +382,11 @@ exec /bin/rm "$@"
   }, budget);
 
   it.each([
-    ['8193 ASCII bytes', `${PLACEHOLDER}\n${BODY}${'x'.repeat(NOTE_CAP - PLACEHOLDER.length - BODY.length)}`],
-    ['multibyte text above the cap', `${PLACEHOLDER}\n${BODY}${'é'.repeat(4100)}`],
-    ['text that exceeds the cap only after the new stamp', `<!-- memory-head:\n${'x'.repeat(NOTE_CAP - 18)}`],
-    ['an extra level-two heading', `${PLACEHOLDER}\n${BODY}## Extra\n`],
-  ])('keeps the old note when the model writes %s', (_name, staged) => {
+    ['8193 ASCII bytes', `${PLACEHOLDER}\n${BODY}${'x'.repeat(NOTE_CAP - PLACEHOLDER.length - BODY.length)}`, 'note byte limit refused'],
+    ['multibyte text above the cap', `${PLACEHOLDER}\n${BODY}${'é'.repeat(4100)}`, 'note byte limit refused'],
+    ['text that exceeds the cap only after the new stamp', `<!-- memory-head:\n${'x'.repeat(NOTE_CAP - 18)}`, 'note byte limit refused'],
+    ['an extra level-two heading', `${PLACEHOLDER}\n${BODY}## Extra\n`, 'note has an extra section'],
+  ])('keeps the old note when the model writes %s', (_name, staged, reason) => {
     fs.writeFileSync(note, OLD_NOTE);
     writeClaudeStub(staged);
     const { log } = runWorker(ONE_SESSION);
@@ -371,6 +396,13 @@ exec /bin/rm "$@"
     expect(fs.existsSync(path.join(memoryDir, SWAP))).toBe(false);
     expect(fs.existsSync(path.join(memoryDir, ONCE))).toBe(true);
     expect(log).not.toMatch(/## Extra|Test note|memory-head:/);
+    const bytes = Buffer.byteLength(UNBORN_STAMP + staged.slice(staged.indexOf('\n')));
+    const messages = log.split('\n').map((line) => line.replace(/^.+? \[background-memory-update\] /, ''));
+    expect(messages.filter((line) => line.startsWith('Run: '))).toEqual([expect.stringContaining(' result=failed ')]);
+    expect(messages.filter((line) => line.startsWith('WARN: note '))).toEqual([
+      `WARN: ${reason} (bytes=${bytes}); verification failed — leaving .processing for recovery`,
+    ]);
+    expect(log).not.toContain('FAIL: verification failed');
   }, budget);
 
   it('accepts a note with two-byte letters within the prompt budget', () => {
@@ -389,9 +421,25 @@ exec /bin/rm "$@"
     const body = `${BODY}### Detail\n`;
     const exactBody = body + 'x'.repeat(NOTE_CAP - stamp.length - body.length);
     writeClaudeStub(`<!-- memory-head: fake branch: other -->\n${exactBody}`);
+    setShellUmask022();
     runQueue(ONE_SESSION);
     expect(fs.readFileSync(note, 'utf8')).toBe(stamp + exactBody);
     expect(fs.statSync(note).mode & 0o777).toBe(0o600);
+  }, budget);
+
+  it('creates the refused swap copy with mode 0600 under umask 022', () => {
+    setShellUmask022();
+    writeFakeExecutable(path.join(bin, 'rm'), `#!/bin/bash
+for file in "$@"; do
+  if [ "$file" = "$TEST_MEMORY/${SWAP}" ] && [ -f "$file" ]; then
+    cp -p "$file" "$TEST_ROOT/refused-swap"
+  fi
+done
+exec /bin/rm "$@"
+`);
+    writeClaudeStub(`${PLACEHOLDER}\n${BODY}## Extra\n`);
+    runWorker(ONE_SESSION);
+    expect(fs.statSync(path.join(root, 'refused-swap')).mode & 0o777).toBe(0o600);
   }, budget);
 
   it('swaps a valid note when the model also reports a denial', () => {
@@ -422,11 +470,11 @@ exec /bin/rm "$@"
   }, budget);
 
   it.each([
-    ['a conflict', 'printf human > "$TEST_MEMORY/WORKING-MEMORY.md"', 'conflict'],
-    ['a denial', 'printf \'%s\\n\' \'{"permission_denials":[{}]}\'', 'failed'],
-    ['a non-zero exit', 'exit 1', 'failed'],
-    ['a watchdog exit', 'exit 143', 'failed'],
-  ])('does not drop a previously refused batch after %s', (_name, afterWrite, result) => {
+    ['a conflict', 'printf human > "$TEST_MEMORY/WORKING-MEMORY.md"', 'conflict', false],
+    ['a denial', 'printf \'%s\\n\' \'{"permission_denials":[{}]}\'', 'failed', true],
+    ['a non-zero exit', 'exit 1', 'failed', false],
+    ['a watchdog exit', 'exit 143', 'failed', false],
+  ])('does not drop a previously refused batch after %s', (_name, afterWrite, result, denied) => {
     writeClaudeStub('No stamp\n');
     runWorker(ONE_SESSION);
     writeClaudeStub(result === 'conflict' ? `${PLACEHOLDER}\n${BODY}` : 'No stamp\n', afterWrite);
@@ -436,6 +484,7 @@ exec /bin/rm "$@"
     expect(fs.existsSync(path.join(memoryDir, NOTICE))).toBe(false);
     expect(fs.existsSync(path.join(memoryDir, ONCE))).toBe(true);
     expect(fs.existsSync(path.join(memoryDir, SWAP))).toBe(false);
+    expect(fs.existsSync(path.join(memoryDir, '.worker-denied-once'))).toBe(denied);
     writeClaudeStub();
     runWorker();
     expect(fs.existsSync(path.join(memoryDir, ONCE))).toBe(false);
@@ -487,7 +536,7 @@ exec /usr/bin/tail "$@"
     expect(fs.existsSync(path.join(memoryDir, BATCH))).toBe(true);
     expect(fs.existsSync(path.join(memoryDir, ONCE))).toBe(false);
     expect(log).toMatch(/Run:.* result=failed/);
-  }, budget);
+  }, FIFO_TEST_TIMEOUT_MS);
 
   it('keeps a FIFO at the note path without a swap', () => {
     makeFifo(note);
@@ -495,12 +544,12 @@ exec /usr/bin/tail "$@"
     expect(fs.lstatSync(note).isFIFO()).toBe(true);
     expect(fs.existsSync(path.join(memoryDir, BATCH))).toBe(true);
     expect(log).toMatch(/Run:.* result=conflict/);
-  }, budget);
+  }, FIFO_TEST_TIMEOUT_MS);
 
   function runMemoryHook(hook: string): string {
-    const run = spawnWithStdin('/bin/bash', [hook], {
-      env, input: JSON.stringify({ cwd: project, source: 'compact' }),
-    });
+    const run = runBounded(hook, (timeout) => spawnWithStdin('/bin/bash', [hook], {
+      env, input: JSON.stringify({ cwd: project, source: 'compact' }), timeout,
+    }));
     expect(run.kind, run.stderr).toBe('clean');
     return run.stdout;
   }
@@ -568,7 +617,7 @@ exec /usr/bin/head "$@"
 
     expect(startContext()).toBe('');
     expect(fs.existsSync(path.join(home, 'note-read'))).toBe(false);
-  }, budget);
+  }, FIFO_TEST_TIMEOUT_MS);
 
   it('does not load a note with a null byte', () => {
     fs.writeFileSync(note, `${BODY}\0unloaded`);
@@ -578,11 +627,15 @@ exec /usr/bin/head "$@"
     expect(context).not.toContain('unloaded');
   }, budget);
 
-  it.each([
-    ['a non-digit mark', 'note-test multi: invalid-mark'],
-    ['extra stamp text', 'note-test extra-stamp-text'],
-    ['a branch above the stamp limit', 'b'.repeat(201)],
-  ])('does not show header advice or stamp text for %s', (_name, branchAndMark) => {
+  it.each(MALFORMED_STAMPS)('keeps only the old note body in the worker prompt for %s', (_name, branchAndMark) => {
+    fs.writeFileSync(note, `<!-- memory-head: ${'a'.repeat(40)} branch: ${branchAndMark} -->\n${OLD_NOTE}`);
+    const { prompt } = runQueue(ONE_SESSION);
+    expect(prompt).toContain(`<existing-memory>\n${OLD_NOTE}</existing-memory>`);
+    expect(prompt).not.toContain(branchAndMark);
+    expect(fs.readFileSync(note, 'utf8').split('\n')[0]).toBe(UNBORN_STAMP);
+  }, budget);
+
+  it.each(MALFORMED_STAMPS)('does not show header advice or stamp text for %s', (_name, branchAndMark) => {
     fs.writeFileSync(note, `<!-- memory-head: ${'a'.repeat(40)} branch: ${branchAndMark} -->\n${BODY}`);
 
     const context = startContext();
