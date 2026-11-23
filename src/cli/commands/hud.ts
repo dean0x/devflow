@@ -22,6 +22,14 @@ interface Settings {
   [key: string]: unknown;
 }
 
+interface HudOptions {
+  status?: boolean;
+  detail?: boolean;
+  forecast?: boolean;
+  enable?: boolean;
+  disable?: boolean;
+}
+
 /**
  * Add the HUD statusLine to settings JSON.
  * Idempotent — returns unchanged JSON if HUD already set.
@@ -138,19 +146,24 @@ export function createHudCommand(): Command {
   .option('--status', 'Show current HUD config')
   .option('--detail', 'Show tool/agent descriptions in HUD')
   .option('--no-detail', 'Hide tool/agent descriptions')
+  .option('--forecast', 'Show the week quota forecast')
+  .option('--no-forecast', 'Hide the week quota forecast')
   .option('--enable', 'Enable HUD in settings')
   .option('--disable', 'Disable HUD (remove statusLine)')
-  .action(async (options) => {
+  .action(async (options: HudOptions) => {
     const hasFlag =
       options.status ||
       options.enable ||
       options.disable ||
-      options.detail !== undefined;
+      options.detail !== undefined ||
+      options.forecast !== undefined;
     if (!hasFlag) {
       p.intro(color.bgCyan(color.white(' HUD ')));
       p.note(
         `${color.cyan('devflow hud --detail')}      Show tool/agent descriptions\n` +
           `${color.cyan('devflow hud --no-detail')}   Hide tool/agent descriptions\n` +
+          `${color.cyan('devflow hud --forecast')}    Show the week quota forecast\n` +
+          `${color.cyan('devflow hud --no-forecast')} Hide the week quota forecast\n` +
           `${color.cyan('devflow hud --status')}      Show current config\n` +
           `${color.cyan('devflow hud --enable')}      Enable HUD in settings\n` +
           `${color.cyan('devflow hud --disable')}     Remove HUD from settings`,
@@ -170,6 +183,7 @@ export function createHudCommand(): Command {
       p.note(
         `${color.dim('Enabled:')}    ${config.enabled ? color.green('yes') : color.dim('no')}\n` +
           `${color.dim('Detail:')}     ${config.detail ? color.green('on') : color.dim('off')}\n` +
+          `${color.dim('Forecast:')}   ${config.forecast ? color.green('on') : color.dim('off')}\n` +
           `${color.dim('Components:')} ${HUD_COMPONENTS.length}`,
         'Current config',
       );
@@ -189,12 +203,19 @@ export function createHudCommand(): Command {
       return;
     }
 
-    if (options.detail !== undefined) {
+    if (options.detail !== undefined || options.forecast !== undefined) {
       const config = loadConfig();
-      config.detail = options.detail;
-      saveConfig(config);
-      p.log.success(`HUD detail ${config.detail ? 'enabled' : 'disabled'}`);
-      return;
+      saveConfig({
+        ...config,
+        detail: options.detail ?? config.detail,
+        forecast: options.forecast ?? config.forecast,
+      });
+      if (options.detail !== undefined) {
+        p.log.success(`HUD detail ${options.detail ? 'enabled' : 'disabled'}`);
+      }
+      if (options.forecast !== undefined) {
+        p.log.success(`HUD forecast ${options.forecast ? 'enabled' : 'disabled'}`);
+      }
     }
 
     if (options.enable) {

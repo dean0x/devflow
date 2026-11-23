@@ -10,6 +10,123 @@ import {
   createHudCommand,
 } from '../src/cli/commands/hud.js';
 import { runCleanupPhase } from '../src/cli/commands/uninstall.js';
+import * as hudConfig from '../src/hud/config.js';
+import type { HudConfig } from '../src/hud/types.js';
+import { stripAnsi } from '../src/hud/colors.js';
+
+describe('hud config flags', () => {
+  let tmpHome: string;
+  const runHud = (...args: string[]) => createHudCommand().exitOverride().parseAsync(args, { from: 'user' });
+  const settingsPath = () => path.join(tmpHome, '.claude', 'settings.json');
+  const statusLine = () => ({ type: 'command', command: path.join(tmpHome, '.devflow', 'scripts', 'hud.sh') });
+  const readConfig = async (): Promise<unknown> => JSON.parse(await fs.readFile(hudConfig.getConfigPath(), 'utf-8'));
+  const readSettings = async (): Promise<unknown> => JSON.parse(await fs.readFile(settingsPath(), 'utf-8'));
+
+  beforeEach(async () => {
+    tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'devflow-hud-flags-'));
+    vi.stubEnv('HOME', tmpHome);
+    vi.stubEnv('CLAUDE_CONFIG_DIR', path.dirname(settingsPath()));
+    await fs.mkdir(path.dirname(settingsPath()));
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    await fs.rm(tmpHome, { recursive: true, force: true });
+  });
+
+  it.each([
+    ['--forecast', { enabled: false, detail: true, forecast: false }],
+    ['--no-forecast', { enabled: true, detail: false, forecast: true }],
+  ] as const)('%s saves only the forecast change', async (flag, config) => {
+    hudConfig.saveConfig(config);
+
+    await runHud(flag);
+
+    expect(await readConfig()).toEqual({ ...config, forecast: !config.forecast });
+  });
+
+  it.each([
+    [true, 'on', '--no-forecast'],
+    [false, 'off', '--forecast'],
+  ] as const)('--status reports forecast %s without a config change', async (forecast, label, flag) => {
+    const config: HudConfig = { enabled: true, detail: false, forecast };
+    hudConfig.saveConfig(config);
+    const output = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+
+    await runHud('--status', flag);
+
+    expect(stripAnsi(output.mock.calls.map(([text]) => String(text)).join(''))).toMatch(
+      new RegExp(`Forecast:\\s+${label}\\b`),
+    );
+    expect(await readConfig()).toEqual(config);
+  });
+
+  it('lists both forecast flags without a change flag', async () => {
+    const output = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+
+    await runHud();
+
+    const text = stripAnsi(output.mock.calls.map(([chunk]) => String(chunk)).join(''));
+    expect(text).toContain('devflow hud --forecast');
+    expect(text).toContain('devflow hud --no-forecast');
+    expect(text).not.toContain('weekForecast');
+  });
+
+  it('saves both detail and forecast in one write', async () => {
+    hudConfig.saveConfig({ enabled: false, detail: false, forecast: false });
+    const save = vi.spyOn(hudConfig, 'saveConfig');
+
+    await runHud('--detail', '--forecast');
+
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(await readConfig()).toEqual({ enabled: false, detail: true, forecast: true });
+  });
+
+  it('--enable with --forecast saves both and registers the status line', async () => {
+    hudConfig.saveConfig({ enabled: false, detail: true, forecast: false });
+
+    await runHud('--enable', '--forecast');
+
+    expect(await readConfig()).toEqual({ enabled: true, detail: true, forecast: true });
+    expect(await readSettings()).toEqual({ statusLine: statusLine() });
+  });
+
+  it('--detail with --enable saves both and registers the status line', async () => {
+    hudConfig.saveConfig({ enabled: false, detail: false, forecast: true });
+
+    await runHud('--detail', '--enable');
+
+    expect(await readConfig()).toEqual({ enabled: true, detail: true, forecast: true });
+    expect(await readSettings()).toEqual({ statusLine: statusLine() });
+  });
+
+  it('--detail with --disable saves both and removes the status line', async () => {
+    hudConfig.saveConfig({ enabled: true, detail: false, forecast: true });
+    await fs.writeFile(settingsPath(), JSON.stringify({ statusLine: statusLine(), model: 'opus' }));
+
+    await runHud('--detail', '--disable');
+
+    expect(await readConfig()).toEqual({ enabled: false, detail: true, forecast: true });
+    expect(await readSettings()).toEqual({ model: 'opus' });
+  });
+
+  it('saves and reports both options when non-interactive --enable leaves a foreign status line', async () => {
+    const settings = { statusLine: { type: 'command', command: 'custom-status' } };
+    await fs.writeFile(settingsPath(), JSON.stringify(settings));
+    hudConfig.saveConfig({ enabled: false, detail: false, forecast: false });
+    vi.spyOn(process, 'stdin', 'get').mockReturnValue(Object.create(process.stdin, { isTTY: { value: false } }));
+    const output = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+
+    await runHud('--enable', '--detail', '--forecast');
+
+    expect(await readConfig()).toEqual({ enabled: false, detail: true, forecast: true });
+    expect(await readSettings()).toEqual(settings);
+    expect(stripAnsi(output.mock.calls.map(([text]) => String(text)).join(''))).toMatch(
+      /HUD detail enabled[\s\S]*HUD forecast enabled[\s\S]*Non-interactive mode/,
+    );
+  });
+});
 
 describe('addHudStatusLine', () => {
   it('adds statusLine to empty settings', () => {
