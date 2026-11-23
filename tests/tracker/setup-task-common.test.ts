@@ -296,6 +296,13 @@ describe('fetch-issue: the acceptance-criteria recipe, executed', () => {
     },
     { label: 'a higher-level # heading ends a ### section', body: '### Acceptance criteria\n- a\n# Top\n- c\n', expected: '- a' },
     { label: 'a # or ##### heading starts no section', body: '# Acceptance criteria\n- a\n##### Acceptance criteria\n- b\n', expected: '' },
+    { label: 'a second ### heading ends a ### section', body: '### Acceptance criteria\n- a\n### Notes\n- c\n', expected: '- a' },
+    {
+      label: 'a # comment inside a code fence does not end the section',
+      body: '## Acceptance criteria\n- [ ] AC-1 one\n\n```bash\n# build it\n## step\nnpm run build\n```\n\n~~~\n#\n~~~\n- [ ] AC-2 two\n## Notes\n- c\n',
+      expected: '- [ ] AC-1 one\n- [ ] AC-2 two',
+    },
+    { label: 'no space after the hashes, trailing blanks', body: '##Acceptance criteria \t\n- a\n## Notes\n- c\n', expected: '- a' },
   ]
 
   for (const { label, body, expected } of cases) {
