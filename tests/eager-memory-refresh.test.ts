@@ -141,6 +141,7 @@ afterEach(() => {
 
 /** Tools the worker and its sourced helpers call. None of them is a JSON parser. */
 const FARM_TOOLS = [
+  'od',
   // /usr/bin on macOS; /usr/bin or /bin on Linux
   'wc', 'head', 'tail', 'tr', 'touch', 'stat', 'sed', 'cut',
   'nohup', 'git', 'find', 'grep', 'mktemp', 'dirname', 'cksum',
@@ -3401,7 +3402,8 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
 
     expect(fs.existsSync(created), 'touch never follows the link').toBe(false);
     expect(fs.readlinkSync(okFile), 'the link is left as it was').toBe(created);
-    expect(fs.readFileSync(path.join(memoryDir, 'WORKING-MEMORY.md'), 'utf-8'), 'non-vacuity: the refresh landed').toContain('memory-head: testsha');
+    const headSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectDir, encoding: 'utf-8' }).trim();
+    expect(fs.readFileSync(path.join(memoryDir, 'WORKING-MEMORY.md'), 'utf-8'), 'non-vacuity: the refresh landed').toContain(`memory-head: ${headSha} `);
     expect(refusals('background-memory-update'), 'the skipped stamp is logged once').toHaveLength(1);
   });
 

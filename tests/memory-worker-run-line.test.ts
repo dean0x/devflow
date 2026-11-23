@@ -146,7 +146,7 @@ describe('the memory worker writes one Run line per run', () => {
    * One worker run in a fresh project, home and fake claude; resolves to the Run lines it
    * wrote, each without its timestamp and hook name.
    */
-  async function runOnce(withFolderAtStagedPath: boolean): Promise<string[]> {
+  async function runOnce(withFolderAtStagedPath: boolean, heading = '## Now'): Promise<string[]> {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-runline-'));
     try {
       const project = path.join(root, 'project');
@@ -173,7 +173,7 @@ describe('the memory worker writes one Run line per run', () => {
           'if [ "${1:-}" = "--version" ]; then echo "2.1.293 (Claude Code)"; exit 0; fi',
           'cat >/dev/null',
           `echo '<!-- memory-head: testsha branch: main -->' > '${staged}'`,
-          `echo '## Now' >> '${staged}'`,
+          `echo '${heading}' >> '${staged}'`,
           'exit 0',
           '',
         ].join('\n'),
@@ -200,6 +200,12 @@ describe('the memory worker writes one Run line per run', () => {
       fs.rmSync(root, { recursive: true, force: true });
     }
   }
+
+  it('writes one failed Run line when the note has an extra section', async () => {
+    expect(await runOnce(false, '## Extra')).toEqual([
+      'Run: cli=2.1.293 argv=lean result=failed denials=unknown removed=none',
+    ]);
+  });
 
   it.skipIf(!STRESS)('writes the expected single Run line in each of many workers that run at once', async () => {
     const total = 64;

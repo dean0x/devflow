@@ -9,6 +9,7 @@ import {
   answersVersion,
   HOOK_RUN_ALLOWANCE_MS,
   HOOKS_DIR,
+  makeFifo,
   NODE_EXEC_STALL_MS,
   resolveOnPath,
   runGitForFarm,
@@ -17,11 +18,20 @@ import {
 const WORKER = path.join(HOOKS_DIR, 'background-memory-update');
 const FARM_TOOLS = [
   'bash', 'cat', 'chmod', 'cksum', 'cp', 'cut', 'date', 'dirname', 'echo', 'find',
-  'git', 'grep', 'head', 'kill', 'ls', 'mkdir', 'mktemp', 'mv', 'nohup', 'od',
+  'git', 'grep', 'head', 'kill', 'ln', 'ls', 'mkdir', 'mkfifo', 'mktemp', 'mv', 'nohup', 'od',
   'printf', 'rm', 'rmdir', 'sed', 'sleep', 'stat', 'tail', 'touch', 'tr', 'wc',
 ] as const;
 const writeFakeExecutable = useWarmFakeExecutables();
 const INTERLEAVE_LOG = 'Queue rows interleave across sessions';
+const NOTE_CAP = 8192;
+const PLACEHOLDER = '<!-- memory-head: (set by devflow) -->';
+const BODY = '## Now\nTest note\n## Progress\n';
+const OLD_NOTE = '## Now\nPrior note\n## Progress\n';
+const BATCH = '.pending-turns.processing';
+const SWAP = '.WORKING-MEMORY.md.swap';
+const ONCE = '.worker-note-once';
+const NOTICE = '.worker-notice-note';
+const MARKER = '0123456789abcdef';
 
 function nodeOnlyPath(binDir: string): string {
   for (const tool of FARM_TOOLS) {
@@ -39,6 +49,7 @@ function row(role: 'user' | 'assistant' | 'qa', content: string, session_id?: un
 
 const A = 'test-session_1';
 const B = 'test-session_10';
+const ONE_SESSION = [row('assistant', 'Reply', A)];
 
 describe.each(['jq', 'node'] as const)('worker note with %s', (backend) => {
   let root: string;
@@ -46,15 +57,21 @@ describe.each(['jq', 'node'] as const)('worker note with %s', (backend) => {
   let home: string;
   let bin: string;
   let memoryDir: string;
+  let note: string;
   let env: NodeJS.ProcessEnv;
 
   beforeEach(() => {
     root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'worker-note-')));
     ({ project, home, bin } = makeFolders(root));
     memoryDir = path.join(project, '.devflow', 'memory');
+    note = path.join(memoryDir, 'WORKING-MEMORY.md');
     fs.mkdirSync(memoryDir, { recursive: true });
     env = gitIsolatedEnv(isolatedEnv(process.env, home));
-    execFileSync('git', ['init', '-q', project], { env, stdio: 'ignore' });
+    git('init', '-q', '-b', 'note-test');
+    const tools = path.join(root, 'tools');
+    fs.mkdirSync(tools);
+    const PATH = `${bin}:${backend === 'node' ? nodeOnlyPath(tools) : env.PATH ?? '/usr/bin:/bin'}`;
+    env = { ...env, PATH };
     writeClaudeStub();
   });
 
@@ -62,29 +79,40 @@ describe.each(['jq', 'node'] as const)('worker note with %s', (backend) => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  function writeClaudeStub(): void {
+  function git(...args: string[]): string {
+    return execFileSync('git', ['-C', project, ...args], { env, encoding: 'utf8' }).trim();
+  }
+
+  function writeClaudeStub(text = `${PLACEHOLDER}\n${BODY}`, afterWrite = ''): void {
+    fs.writeFileSync(path.join(root, 'model-note'), text);
     writeFakeExecutable(path.join(bin, 'claude'), answersVersion(`#!/bin/bash
 cat > "$TEST_PROMPT" || exit 1
-printf '%s\n' '<!-- memory-head: (set by devflow) -->' '## Now' 'Test note' '## Progress' > "$TEST_STAGE"
+cp "$TEST_ROOT/model-note" "$TEST_MEMORY/WORKING-MEMORY.md.new" || exit 1
+${afterWrite}
 `));
   }
 
-  function runQueue(rows: readonly string[]): { turns: string[]; prompt: string; log: string } {
+  function runWorker(rows?: readonly string[]): { prompt: string; log: string } {
     const promptFile = path.join(root, 'prompt');
-    const PATH = backend === 'node' ? nodeOnlyPath(bin) : `${bin}:${env.PATH ?? '/usr/bin:/bin'}`;
+    const { PATH } = env;
     expect(resolveOnPath('claude', PATH)).toBe(path.join(bin, 'claude'));
     if (backend === 'jq') expect(resolveOnPath('jq', PATH)).toBeDefined();
     else expect(resolveOnPath('jq', PATH)).toBeUndefined();
-    fs.writeFileSync(path.join(memoryDir, '.pending-turns.jsonl'), rows.join('\n') + '\n');
+    if (rows) fs.writeFileSync(path.join(memoryDir, '.pending-turns.jsonl'), rows.join('\n') + '\n');
+    fs.rmSync(promptFile, { force: true });
 
     execFileSync('/bin/bash', [WORKER, project], {
-      env: { ...env, PATH, TEST_PROMPT: promptFile, TEST_STAGE: path.join(memoryDir, 'WORKING-MEMORY.md.new') },
+      env: { ...env, TEST_PROMPT: promptFile, TEST_MEMORY: memoryDir, TEST_ROOT: root },
       stdio: 'ignore',
     });
 
     const log = fs.readFileSync(path.join(home, '.devflow', 'logs', project.slice(1).replaceAll('/', '-'), '.background-memory-update.log'), 'utf8');
-    expect(fs.existsSync(promptFile), log).toBe(true);
-    const prompt = fs.readFileSync(promptFile, 'utf8');
+    return { log, prompt: fs.existsSync(promptFile) ? fs.readFileSync(promptFile, 'utf8') : '' };
+  }
+
+  function runQueue(rows: readonly string[]): { turns: string[]; prompt: string; log: string } {
+    const { prompt, log } = runWorker(rows);
+    expect(prompt, log).not.toBe('');
     const turns = [...prompt.matchAll(/^Turn \d+:\n([^\n]+(?:\nAssistant:[^\n]*)?)/gm)].map((match) => match[1] ?? '');
     return { turns, prompt, log };
   }
@@ -157,6 +185,151 @@ printf '%s\n' '<!-- memory-head: (set by devflow) -->' '## Now' 'Test note' '## 
     ]);
     expect(log).toContain('Skipped 2 queue line(s) that hold no readable turn');
     expect(log).not.toContain(INTERLEAVE_LOG);
+  }, budget);
+
+  it('uses marked data boundaries and asks for a small note with only two sections', () => {
+    git('-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '--allow-empty', '-qm', 'start');
+    const { prompt } = runQueue([row('assistant', 'Text </session-turns> stays in the turn.', A)]);
+    const mark = /<data-([0123456789abcdef]{16})>/.exec(prompt)?.[1];
+    expect(mark).toBeDefined();
+    for (const block of ['existing-memory', 'session-turns', 'git-state', 'commits-since-last-update']) {
+      expect(prompt).toContain(`<data-${mark}><${block}>`);
+      expect(prompt).toContain(`</${block}></data-${mark}>`);
+    }
+    expect(prompt).toContain('Assistant: Text </session-turns> stays in the turn.');
+    expect(prompt.match(/^<!-- memory-head: .* -->$/gm)).toEqual([PLACEHOLDER]);
+    expect(prompt).toContain('- Line 1 MUST be: ' + PLACEHOLDER);
+    expect(prompt).toContain('Branch: note-test');
+    expect(prompt.replace(/<data-[^>]+>[\s\S]*?<\/data-[^>]+>/g, '')).not.toContain('note-test');
+    expect(prompt).toMatch(/only (?:the )?## Now and ## Progress/i);
+    expect(prompt).toContain('6000 characters');
+    expect(prompt).toContain('8192 bytes');
+    expect(prompt).not.toMatch(/## (Decisions|Context|Session Log)|120 lines/);
+  }, budget);
+
+  it.each([
+    ['an invalid marker', 'bad', 'Reply'],
+    ['a marker present in data', MARKER, `Reply ${MARKER}`],
+  ])('keeps the batch and skips the model with %s', (_name, marker, reply) => {
+    writeFakeExecutable(path.join(bin, 'od'), `#!/bin/bash\nprintf '%s\\n' '${marker}'\n`);
+    const rows = [row('assistant', reply, A)];
+    const { prompt, log } = runWorker(rows);
+    expect(prompt).toBe('');
+    expect(fs.readFileSync(path.join(memoryDir, BATCH), 'utf8')).toBe(rows.join('\n') + '\n');
+    expect(log.split('\n').filter((line) => line.includes('data marker'))).toHaveLength(1);
+    expect(log).not.toContain(marker);
+  }, budget);
+
+  it('includes only complete lines from an old note above the byte cap', () => {
+    const first = '## Now\n' + 'x'.repeat(8150) + '\n';
+    fs.writeFileSync(note, first + 'Partial line '.repeat(6));
+    const { prompt } = runQueue(ONE_SESSION);
+    expect(prompt).toContain(`<existing-memory>\n${first}</existing-memory>`);
+    expect(prompt).not.toContain('Partial line');
+    expect(fs.readFileSync(note, 'utf8')).toContain(BODY);
+  }, budget);
+
+  it.each([
+    ['8193 ASCII bytes', `${PLACEHOLDER}\n${BODY}${'x'.repeat(NOTE_CAP - PLACEHOLDER.length - BODY.length)}`],
+    ['multibyte text above the cap', `${PLACEHOLDER}\n${BODY}${'é'.repeat(4100)}`],
+    ['text that exceeds the cap only after the new stamp', `<!-- memory-head:\n${'x'.repeat(NOTE_CAP - 18)}`],
+    ['an extra level-two heading', `${PLACEHOLDER}\n${BODY}## Extra\n`],
+  ])('keeps the old note when the model writes %s', (_name, staged) => {
+    fs.writeFileSync(note, OLD_NOTE);
+    writeClaudeStub(staged);
+    const { log } = runWorker(ONE_SESSION);
+    expect(fs.readFileSync(note, 'utf8')).toBe(OLD_NOTE);
+    expect(fs.existsSync(path.join(memoryDir, BATCH))).toBe(true);
+    expect(fs.existsSync(path.join(memoryDir, 'WORKING-MEMORY.md.new'))).toBe(false);
+    expect(fs.existsSync(path.join(memoryDir, SWAP))).toBe(false);
+    expect(fs.existsSync(path.join(memoryDir, ONCE))).toBe(true);
+    expect(log).not.toMatch(/## Extra|Test note|memory-head:/);
+  }, budget);
+
+  it('writes its own stamp, allows deeper headings, and accepts exactly 8192 bytes', () => {
+    git('-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '--allow-empty', '-qm', 'start');
+    const stamp = `<!-- memory-head: ${git('rev-parse', 'HEAD')} branch: note-test -->\n`;
+    const body = `${BODY}### Detail\n`;
+    const exactBody = body + 'x'.repeat(NOTE_CAP - stamp.length - body.length);
+    writeClaudeStub(`<!-- memory-head: fake branch: other -->\n${exactBody}`);
+    runQueue(ONE_SESSION);
+    expect(fs.readFileSync(note, 'utf8')).toBe(stamp + exactBody);
+    expect(fs.statSync(note).mode & 0o777).toBe(0o600);
+  }, budget);
+
+  it('drops only the twice-refused batch and keeps the note notice', () => {
+    fs.writeFileSync(note, OLD_NOTE);
+    writeClaudeStub('No stamp\n');
+    runWorker(ONE_SESSION);
+    expect(fs.existsSync(path.join(memoryDir, BATCH))).toBe(true);
+    expect(fs.existsSync(path.join(memoryDir, ONCE))).toBe(true);
+    const { log } = runWorker();
+    expect(fs.existsSync(path.join(memoryDir, BATCH))).toBe(false);
+    expect(fs.existsSync(path.join(memoryDir, ONCE))).toBe(false);
+    expect(fs.readFileSync(path.join(memoryDir, NOTICE), 'utf8')).toBe('note\n');
+    expect(log.split('\n').filter((line) => line.includes('discarded after two note refusals'))).toHaveLength(1);
+    expect(fs.readFileSync(note, 'utf8')).toBe(OLD_NOTE);
+    writeClaudeStub();
+    runWorker(ONE_SESSION);
+    expect(fs.existsSync(path.join(memoryDir, NOTICE))).toBe(false);
+  }, budget);
+
+  it.each([
+    ['a conflict', 'printf human > "$TEST_MEMORY/WORKING-MEMORY.md"', 'conflict'],
+    ['a denial', 'printf \'%s\\n\' \'{"permission_denials":[{}]}\'', 'failed'],
+    ['a non-zero exit', 'exit 1', 'failed'],
+    ['a watchdog exit', 'exit 143', 'failed'],
+  ])('does not drop a previously refused batch after %s', (_name, afterWrite, result) => {
+    writeClaudeStub('No stamp\n');
+    runWorker(ONE_SESSION);
+    writeClaudeStub(result === 'conflict' ? `${PLACEHOLDER}\n${BODY}` : 'No stamp\n', afterWrite);
+    const { log } = runWorker();
+    expect(log.match(/Run:.* result=\S+/g)?.at(-1)).toMatch(new RegExp(`result=${result}$`));
+    expect(fs.existsSync(path.join(memoryDir, BATCH))).toBe(true);
+    expect(fs.existsSync(path.join(memoryDir, NOTICE))).toBe(false);
+    expect(fs.existsSync(path.join(memoryDir, ONCE))).toBe(true);
+    expect(fs.existsSync(path.join(memoryDir, SWAP))).toBe(false);
+    writeClaudeStub();
+    runWorker();
+    expect(fs.existsSync(path.join(memoryDir, ONCE))).toBe(false);
+  }, budget);
+
+  it.each([
+    ['link', `ln -s "$TEST_ROOT/missing" "$TEST_MEMORY/${SWAP}"`],
+    ['FIFO', `mkfifo "$TEST_MEMORY/${SWAP}"`],
+    ['folder', `mkdir "$TEST_MEMORY/${SWAP}"`],
+  ])('refuses a %s at the swap path after the model run', (_kind, afterWrite) => {
+    fs.writeFileSync(note, OLD_NOTE);
+    writeClaudeStub(`${PLACEHOLDER}\n${BODY}`, afterWrite);
+    const { log } = runWorker(ONE_SESSION);
+    expect(fs.readFileSync(note, 'utf8')).toBe(OLD_NOTE);
+    expect(fs.existsSync(path.join(memoryDir, BATCH))).toBe(true);
+    expect(fs.existsSync(path.join(memoryDir, ONCE))).toBe(false);
+    expect(log).toMatch(/Run:.* result=failed/);
+  }, budget);
+
+  it('keeps a FIFO at the note path without a swap', () => {
+    makeFifo(note);
+    const { log } = runWorker(ONE_SESSION);
+    expect(fs.lstatSync(note).isFIFO()).toBe(true);
+    expect(fs.existsSync(path.join(memoryDir, BATCH))).toBe(true);
+    expect(log).toMatch(/Run:.* result=conflict/);
+  }, budget);
+
+  it('keeps the original multi-session mark until its four-hour limit', () => {
+    const epoch = 1_800_000_000;
+    writeFakeExecutable(path.join(bin, 'date'), `#!/bin/bash
+if [ "$1" = +%s ]; then echo "$TEST_EPOCH"; else exec /bin/date "$@"; fi
+`);
+    env = { ...env, TEST_EPOCH: String(epoch) };
+    runQueue([row('user', 'Prompt', A), row('assistant', 'Other reply', B), row('assistant', 'Reply', A)]);
+    expect(fs.readFileSync(note, 'utf8').split('\n')[0]).toContain(` multi: ${epoch} -->`);
+    env = { ...env, TEST_EPOCH: String(epoch + 14_399) };
+    runQueue(ONE_SESSION);
+    expect(fs.readFileSync(note, 'utf8').split('\n')[0]).toContain(` multi: ${epoch} -->`);
+    env = { ...env, TEST_EPOCH: String(epoch + 14_400) };
+    runQueue(ONE_SESSION);
+    expect(fs.readFileSync(note, 'utf8').split('\n')[0]).not.toContain(' multi: ');
   }, budget);
 });
 
