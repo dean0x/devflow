@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The GitHub issue fetch finds the acceptance criteria under a `##`, `###` or `####` heading. The section ends at the next heading of the same level or a higher level (#808).
+
 ---
 
 ## [3.20.0] - 2026-11-23

@@ -122,7 +122,7 @@ gh issue view "$ISSUE_NUMBER" \
 BODY=$(gh issue view "$ISSUE" --json body -q '.body')
 
 # Extract acceptance criteria
-CRITERIA=$(printf '%s\n' "$BODY" | tr -d '\r' | awk 'tolower($0) ~ /^##[[:blank:]]*acceptance criteria:?[[:blank:]]*$/ {f=1; next} /^##[[:blank:]]/ {f=0} f' | grep -E '^[[:space:]]*([-*]|[0-9]+[.)])[[:space:]]+[^[:space:]]' || true)
+CRITERIA=$(printf '%s\n' "$BODY" | tr -d '\r' | awk '/^[[:blank:]]*([`][`][`]|~~~)/ {c=!c} {h=0; if (!c && match($0, /^#+/)) h=RLENGTH; t=tolower(substr($0, h+1))} f && h && h<=lvl && (t=="" || t ~ /^[[:blank:]]/) {f=0} !f && h>=2 && h<=4 && t ~ /^[[:blank:]]*acceptance criteria:?[[:blank:]]*$/ {f=1; lvl=h; next} f' | grep -E '^[[:space:]]*([-*]|[0-9]+[.)])[[:space:]]+[^[:space:]]' || true)
 
 # Extract dependencies
 DEPENDS_ON=$(echo "$BODY" | grep -oE '(depends on|blocked by) #[0-9]+' | grep -oE '#[0-9]+' || true)
