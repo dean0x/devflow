@@ -72,7 +72,7 @@ export interface InstallConfig {
  * `devflow init` accepts; install-snapshot.test.ts holds it to the commander definition.
  */
 export const INSTALL_CONFIGS: readonly InstallConfig[] = [
-  { name: 'github', initArgs: ['--recommended', '--security', 'user'] },
+  { name: 'github', initArgs: ['--recommended', '--memory', '--security', 'user'] },
   { name: 'jira-hipaa', initArgs: ['--tracker', 'jira', '--compliance', 'hipaa', '--security', 'user'] },
   {
     name: 'all-off',

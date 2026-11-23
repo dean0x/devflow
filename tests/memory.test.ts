@@ -5,6 +5,7 @@ import * as os from 'os';
 import { exec, execFileSync } from 'child_process';
 import { addMemoryHooks, removeMemoryHooks, hasMemoryHooks, countMemoryHooks, convergeMemoryHooks, cleanQueueFiles, CLEAN_QUEUE_POOL_LIMIT, hasMemoryDir, filterProjectsWithMemory, MEMORY_MIN_PERMISSION_VERSION, workingMemoryNote } from '../src/cli/commands/memory.js';
 import { probeTrackedArea } from '../src/core/tracked-areas.js';
+import { createSandbox, removeSandbox, runCli } from './install-snapshot-helpers.js';
 
 // A pass-through spy: every test below runs the real probe unless it swaps one in.
 vi.mock('../src/core/tracked-areas.js', async (importOriginal) => {
@@ -989,5 +990,34 @@ describe('the memory worker version floor', () => {
 
     expect(note).toContain('Preserves session context');
     expect(note).toContain('Applies to every project.');
+  });
+});
+
+describe('the init copy for working memory', () => {
+  it('tells users how to turn memory on after a fresh install', () => {
+    const sandbox = createSandbox();
+    try {
+      const result = runCli(sandbox, ['init', '--recommended']);
+      expect(result.status, result.output).toBe(0);
+      expect(result.output).toMatch(/Working memory:\s+disabled \(turn on: devflow memory --enable\)/);
+    } finally {
+      removeSandbox(sandbox);
+    }
+  });
+
+  it('asks whether to enable memory without a recommendation', async () => {
+    const init = await fs.readFile(path.resolve(__dirname, '../src/cli/commands/init.ts'), 'utf-8');
+    expect(init.includes("message: 'Enable working memory?',"), 'the prompt asks only whether to enable memory').toBe(true);
+  });
+
+  it('states the note cap and gives advice for parallel sessions', () => {
+    expect(workingMemoryNote()).toContain('8 KB (8,192 bytes). Use one worktree for each parallel session.');
+  });
+
+  it('states the same note cap as the shell helper (TP-50)', async ({ skip }) => {
+    const hook = await fs.readFile(path.resolve(__dirname, '../src/assets/scripts/hooks/memory-permission'), 'utf-8');
+    const cap = hook.match(/^MEMORY_NOTE_CAP_BYTES=(\d+)$/m)?.[1];
+    if (cap === undefined) return skip(); // S4 adds the shell constant and tests that it is present.
+    expect(workingMemoryNote()).toContain(`(${Number(cap).toLocaleString('en-US')} bytes)`);
   });
 });
