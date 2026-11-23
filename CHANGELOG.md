@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - The HUD can show a Claude week quota forecast from the current session's data. The forecast is off by default and needs no tokenmeter data. Run `devflow hud --forecast` to turn it on. Run `devflow hud --no-forecast` to turn it off. Devflow saves your choice in the `forecast` field of `~/.devflow/hud.json`. When the HUD and the forecast are on, the HUD adds the `weekForecast` component.
+- **Parallel sessions.** Working memory pairs turns within each session. If two sessions write the same note, in one batch or in separate batches, the note header flags the shared note for four hours. Use one worktree for each parallel session.
+
+### Changed
+
+- **Working memory is off by default.** Existing installs keep their choice. Use `devflow memory --enable` to turn it on. `devflow init --reset` restores the off default.
+- **Short memory note.** The note has a limit of 8 KB (8,192 bytes) and has two sections: `## Now` and `## Progress`. Session start skips notes above the limit. The worker prompt keeps each data block separate.
 
 ### Fixed
 

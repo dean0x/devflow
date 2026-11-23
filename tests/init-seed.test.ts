@@ -62,6 +62,10 @@ describe('resolveSeedFeatures', () => {
     expect(result).toEqual(FEATURE_DEFAULTS);
   });
 
+  it('seeds working memory off for a fresh install', () => {
+    expect(resolveSeedFeatures(null).memory).toBe(false);
+  });
+
   it('manifest present, no config → reads ambient/hud/rules/proxy and memory/knowledge/curation from manifest', () => {
     const manifest = makeManifest({
       features: {
@@ -538,7 +542,6 @@ describe('resolveInitSeed — re-init composability (WS1)', () => {
     // Simulate --reset: seedManifest = null, seedConfig = null (prior state ignored)
     const seed = resolveInitSeed(null, '{}', DEVFLOW_PLUGINS);
 
-    // Features: all FEATURE_DEFAULTS (all true)
     expect(seed.features).toEqual(FEATURE_DEFAULTS);
     // view-mode: 'default' (no settings, no manifest — encoded in flags)
     expect(readViewMode(seed.flags)).toBe('default');
@@ -551,11 +554,13 @@ describe('resolveInitSeed — re-init composability (WS1)', () => {
     expect(seed.languagePlugins).toEqual([]);
   });
 
+  it('seeds working memory off on reset even if the prior install has it on', () => {
+    const { seedManifest, seedSettings } = resolveResetGatedInputs(true, makeManifest(), null, '{}');
+    expect(resolveInitSeed(seedManifest, seedSettings, DEVFLOW_PLUGINS).features.memory).toBe(false);
+  });
+
   it('composability fix: --no-memory on re-init preserves other prior state via applyCliToggles', () => {
-    // The original composability bug: devflow flags --disable tui + devflow memory --disable
-    // were reset to defaults on --recommended re-init. After WS1, applyCliToggles(seed, {memory:false})
-    // preserves the seed's other values while only overriding memory.
-    const seed = resolveInitSeed(null, '{}', DEVFLOW_PLUGINS); // fresh seed for this test
+    const seed = resolveInitSeed(makeManifest(), '{}', DEVFLOW_PLUGINS);
 
     const seedWithMemoryDisabled: FeatureSeed = {
       ...seed.features,

@@ -76,10 +76,10 @@ export interface FeatureSeed {
   gateLevel: unknown;
 }
 
-/** Registry defaults — all features enabled except proxy (advanced-only, off by default). */
+/** Feature defaults for a new install or factory reset. */
 export const FEATURE_DEFAULTS: FeatureSeed = {
   ambient: true,
-  memory: true,
+  memory: false,
   hud: true,
   knowledge: true,
   curation: true,

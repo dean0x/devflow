@@ -1,5 +1,5 @@
 # hook-matrix golden — what every installed hook writes, per location (#388 AC-5, TP-7)
-# install: devflow init --recommended --security user; each hook runs as sh -c <settings.json command>, JSON payload on stdin
+# install: devflow init --recommended --memory --security user; each hook runs as sh -c <settings.json command>, JSON payload on stdin
 # Locations: root = repo/, subdir = repo/sub/, worktree = wt/ (git worktree add), non-git = nongit/. Paths are relative to the sandbox root.
 # Each cell starts from the same post-install tree (restored after every cell). A = added, M = modified, D = removed; .git is not walked.
 # This records TODAY's behaviour, bugs included: a later PR that changes a cell says why in its fixture-only test(snapshot): commit.

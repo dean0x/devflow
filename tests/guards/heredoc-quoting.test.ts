@@ -78,9 +78,9 @@ const SCANNED_EXTENSIONS: readonly string[] = ['.md', '.mds', '.sh', '.bash'];
  * list may shrink, never grow.
  */
 const KNOWN_UNQUOTED_HEREDOCS: readonly string[] = [
-  'src/assets/scripts/hooks/background-memory-update:694',
-  'src/assets/scripts/hooks/background-memory-update:812',
-  'src/assets/scripts/hooks/capture-question:158',
+  'src/assets/scripts/hooks/background-memory-update:813',
+  'src/assets/scripts/hooks/background-memory-update:986',
+  'src/assets/scripts/hooks/capture-question:162',
 ];
 
 interface HeredocSite {

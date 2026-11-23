@@ -206,6 +206,6 @@ Every loop and read has a bound, each a named constant: `E4_MAX_SKIPS`, `CITED_S
 - `.devflow/features/curation-capture-system/KNOWLEDGE.md`: the hub: data files, feature switches, roots, the capture hooks and the table of D-series names.
 - `.devflow/features/curation-capture-system-agent/KNOWLEDGE.md`: the Curate agent that drives these ops, the owned queue claim and heartbeat, `devflow curation`, the TypeScript seam and the HUD.
 - `.devflow/features/curation-capture-system-links/KNOWLEDGE.md`: how the store refuses to write or read through a symbolic link (`linkedCurationFolder`, `readTextUnlinked`).
-- `.devflow/features/curation-capture-system-memory-worker/KNOWLEDGE.md`: the generic jq-less ops that share `json-helper.cjs`.
+- `.devflow/features/curation-capture-system-memory-backup-json/KNOWLEDGE.md`: the generic jq-less ops that share `json-helper.cjs`.
 - `.devflow/features/test-harness/KNOWLEDGE.md`: the guards on this area (`no-ledger-citations`, `no-fsmonitor-index-read`).
 - `docs/reference/hooks.md` (the Curation pipeline) and `docs/reference/file-organization.md` (the data-file table and ops).

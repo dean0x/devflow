@@ -203,14 +203,10 @@ function parseManifestFlags(
 }
 
 /**
- * Whether a parsed manifest object carries every field {@link readManifest}
- * requires: a version, a plugin list, a `features` object with boolean `ambient`
- * and `memory`, and string `installedAt` and `updatedAt`. Pure. A manifest that
- * fails it reads as "no prior install".
- *
- * Exported so a raw reader can tell a manifest this reader rejects from one it
- * accepts without calling it: readManifest heal-writes, and a read-only status
- * must not.
+ * Check for a version, a plugin list, a `features` object with boolean `ambient`
+ * and `memory`, and string `installedAt` and `updatedAt`.
+ * Raw readers require a stored `memory` boolean. {@link readManifest} supplies
+ * `true` before this check if the key is absent.
  */
 export function hasRequiredManifestFields(data: Record<string, unknown>): boolean {
   const features = data.features as Record<string, unknown> | undefined;
@@ -230,6 +226,7 @@ export function hasRequiredManifestFields(data: Record<string, unknown>): boolea
  * Read and parse the manifest file. Returns null if missing or corrupt.
  *
  * Self-heals the following on-disk inconsistencies:
+ * - features.memory absent → true (D-FEATURES-ABSENT-ON); a non-boolean value is rejected
  * - features.kb → features.knowledge rename (both absent → true, D-FEATURES-ABSENT-ON)
  * - the curation switch (features.curation beside its pre-rename copy features.learning,
  *   and the oldest features.decisions) resolves by the machine rule — false in either
@@ -263,23 +260,20 @@ export async function readManifest(
   const manifestPath = path.join(devflowDir, 'manifest.json');
   try {
     const content = await fs.readFile(manifestPath, 'utf-8');
-    const data = JSON.parse(content) as Record<string, unknown>;
+    const raw: unknown = JSON.parse(content);
+    if (typeof raw !== 'object' || raw === null || !('features' in raw)) return null;
+    const rawFeatures = raw.features;
+    if (typeof rawFeatures !== 'object' || rawFeatures === null || Array.isArray(rawFeatures)) return null;
+
+    // Runtime gates read an absent memory key as on. Keep that state on re-init.
+    // Only this reader supplies the absent key. A stored value must still be a boolean.
+    const memoryMissing = !Object.hasOwn(rawFeatures, 'memory');
+    const data: Record<string, unknown> = memoryMissing
+      ? { ...raw, features: { ...rawFeatures, memory: true } }
+      : raw;
     if (!hasRequiredManifestFields(data)) return null;
     const features = data.features as Record<string, unknown>;
 
-    // D-FEATURES-ABSENT-ON (a sub-decision of D-FEATURES-NARROW-ONLY,
-    // src/core/feature-switch.ts): knowledge and curation are machine-wide
-    // switches, and every runtime gate — queue_read_gates in the hooks,
-    // isMachineFeatureOn in the CLI, the knowledge write-back prose gate — reads
-    // an ABSENT key as ON. This reader must agree: init seeds from it and every
-    // syncManifestFeature toggle writes its result back, so a `false` default
-    // here would persist "off" for a feature the runtime is running — a plain
-    // re-init or `devflow hud --enable` on an older manifest silently switching
-    // it off machine-wide. Explicit booleans (and their legacy names) are kept
-    // as they are. memory needs no default: it is in the hard-null set above,
-    // so a manifest without it reads as no prior install and init seeds
-    // FEATURE_DEFAULTS.memory (true).
-    //
     // Self-heal: rename features.kb → features.knowledge on disk.
     // Coalesce: features.knowledge wins; fall back to features.kb; default ON.
     // D-KNOWLEDGE-LEGACY-KB: isMachineFeatureOn applies this exact precedence,
@@ -320,6 +314,7 @@ export async function readManifest(
     // (a disagreeing pair, one key alone and neither key all heal); once healed,
     // the pair holds and a second read writes nothing.
     const needsHeal =
+      memoryMissing ||
       features.kb !== undefined ||
       features.decisions !== undefined ||
       features.curation !== curation ||
@@ -547,9 +542,9 @@ export async function removeManifestPlugins(
  * record as `removeManifestPlugins` does, and a heal would rewrite a manifest the uninstall did not mean to
  * touch (and write through a link in a legacy local install).
  *
- * A record is a manifest {@link readManifest} would accept: valid JSON that holds every required field.
- * Anything else is null, never an empty list, so a caller can tell "nothing recorded" from "nothing
- * installed". Entries that are not strings are skipped.
+ * A record must hold every required field, including a `memory` boolean.
+ * If the record does not pass this check, return null so the caller can tell
+ * "nothing recorded" from "nothing installed". Skip entries that are not strings.
  */
 export async function readManifestPlugins(devflowDir: string): Promise<string[] | null> {
   let raw: unknown;

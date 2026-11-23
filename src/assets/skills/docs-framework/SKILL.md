@@ -53,7 +53,7 @@ All generated documentation lives under `.devflow/docs/` at the checkout's tople
 └── evidence-{branch-slug}.md           # /implement test plan and claims; stays after the PR
 
 .devflow/memory/
-├── WORKING-MEMORY.md                   # Auto-maintained by Stop hook (overwritten)
+├── WORKING-MEMORY.md                   # Note when working memory is on
 └── backup.json                         # Pre-compact git state snapshot
 
 .devflow/curation/
@@ -102,7 +102,7 @@ Make a run directory, or the `design/` folder, only with `node "$HOME/.devflow/s
 - **Research**: the Research agents write `{type}.md`, and the Synthesize agent (research mode) writes `research-summary.md` through `RESEARCH_BASE_DIR`, both into `research/{topic-slug}/{timestamp}/`.
 - **Design**: `/plan` writes the design document, and its Skim, Design and Synthesize agents write `plan/{timestamp}/{agent}-{k}.md`.
 - **Handoff and evidence**: `/implement` writes `evidence-{branch-slug}.md`, which stays after the PR, and the handoff file, to which each Code agent appends one phase section and which is deleted once the PR exists.
-- **Memory and curation**: the Stop hook overwrites `.devflow/memory/WORKING-MEMORY.md`; `decisions.md` and `pitfalls.md` are rendered from `decisions-ledger.jsonl` (active entries in full, inactive ones in an Inactive table).
+- **Memory and curation**: The worker updates `WORKING-MEMORY.md` when working memory is on (`devflow memory --enable`). `decisions.md` and `pitfalls.md` come from `decisions-ledger.jsonl` (full active entries; Inactive table).
 
 ### Agents That Don't Persist
 

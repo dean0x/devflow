@@ -46,13 +46,17 @@ if [ "$_JSON_AVAILABLE" = "false" ]; then dbg "EXIT: no json"; exit 0; fi
 
 INPUT=$(cat)
 
-TOOL_NAME=$(printf '%s' "$INPUT" | json_field "tool_name" "")
+# Read the directory, session ID and tool name in one parser call.
+_FIELDS=$(printf '%s' "$INPUT" | json_extract_cwd_sid_field "tool_name") || { dbg "EXIT: extraction failed"; exit 0; }
+CWD="${_FIELDS%%$'\001'*}"
+_FIELDS="${_FIELDS#*$'\001'}"
+SESSION_ID="${_FIELDS%%$'\001'*}"
+TOOL_NAME="${_FIELDS#*$'\001'}"
 if [ "$TOOL_NAME" != "AskUserQuestion" ]; then
-  dbg "EXIT: not AskUserQuestion (tool_name=$TOOL_NAME)"
+  dbg "EXIT: not AskUserQuestion"
   exit 0
 fi
 
-CWD=$(printf '%s' "$INPUT" | json_field "cwd" "")
 if [ -z "$CWD" ] || [ ! -d "$CWD" ]; then dbg "EXIT: bad CWD"; exit 0; fi
 
 devflow_debug_set_cwd "$CWD"
@@ -153,7 +157,7 @@ A: ${A}"
     "$PROJECT_ROOT" "$MEMORY_DIR/.pending-turns.jsonl" \
     "$LEDGER_ROOT" "$CURATION_DIR/.pending-turns.jsonl" \
     "$MEMORY_ENABLED" "$CURATION_ENABLED" \
-    "qa" "$CONTENT" "$TS"
+    "qa" "$CONTENT" "$TS" "$SESSION_ID"
   _QUESTION_COUNT=$(( _QUESTION_COUNT + 1 ))
 done <<EOF
 $QA_ROWS

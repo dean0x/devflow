@@ -2,8 +2,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { readManifest, writeManifest, mergeManifestPlugins, resolvePluginList, detectUpgrade, syncManifestFeature, withoutManifestPlugins, removeManifestPlugins, type ManifestData } from '../src/core/manifest.js';
+import { readManifest, readManifestPlugins, writeManifest, mergeManifestPlugins, resolvePluginList, detectUpgrade, syncManifestFeature, withoutManifestPlugins, removeManifestPlugins, type ManifestData } from '../src/core/manifest.js';
 import { writeMachineFeature } from '../src/core/feature-switch.js';
+import { readGateManifest } from '../src/core/gate-level.js';
 import { getManifestLockPath } from '../src/core/manifest-lock.js';
 import { makeManifest } from './helpers.js';
 
@@ -73,6 +74,53 @@ describe('readManifest', () => {
     await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(partial), 'utf-8');
     const result = await readManifest(tmpDir);
     expect(result).toBeNull();
+  });
+
+  it('records an absent memory switch as on and does not write on the next read', async () => {
+    const file = path.join(tmpDir, 'manifest.json');
+    const { features: { memory, ...features }, ...data } = makeManifest();
+    const raw = JSON.stringify({ ...data, features: { ...features, learning: features.curation } });
+    await fs.writeFile(file, raw);
+
+    expect((await readManifest(tmpDir))?.features.memory).toBe(true);
+    const healed = await fs.readFile(file, 'utf-8');
+    expect(JSON.parse(healed)).toMatchObject({ features: { memory: true } });
+
+    const before = await fs.stat(file);
+    expect((await readManifest(tmpDir))?.features.memory).toBe(true);
+    expect((await fs.stat(file)).ino).toBe(before.ino);
+    expect(await fs.readFile(file, 'utf-8')).toBe(healed);
+  });
+
+  it.each([false, true])('keeps an explicit memory value of %s without a heal', async (memory) => {
+    const file = path.join(tmpDir, 'manifest.json');
+    const data = makeManifest();
+    const raw = JSON.stringify({ ...data, features: { ...data.features, learning: data.features.curation, memory } });
+    await fs.writeFile(file, raw);
+
+    expect((await readManifest(tmpDir))?.features.memory).toBe(memory);
+    expect(await fs.readFile(file, 'utf-8')).toBe(raw);
+  });
+
+  it.each([null, 'false'])('rejects a non-boolean memory value of %j without a heal', async (memory) => {
+    const file = path.join(tmpDir, 'manifest.json');
+    const data = makeManifest();
+    const raw = JSON.stringify({ ...data, features: { ...data.features, memory } });
+    await fs.writeFile(file, raw);
+
+    expect(await readManifest(tmpDir)).toBeNull();
+    expect(await fs.readFile(file, 'utf-8')).toBe(raw);
+  });
+
+  it.each([{}, { memory: 'false' }])('strict manifest readers reject %j in place of a memory boolean', async (memoryField) => {
+    const file = path.join(tmpDir, 'manifest.json');
+    const { features: { memory, ...features }, ...data } = makeManifest();
+    const raw = JSON.stringify({ ...data, features: { ...features, ...memoryField } });
+    await fs.writeFile(file, raw);
+
+    expect(await readManifestPlugins(tmpDir)).toBeNull();
+    expect((await readGateManifest(tmpDir)).kind).toBe('rejected');
+    expect(await fs.readFile(file, 'utf-8')).toBe(raw);
   });
 
   it('returns parsed manifest for valid data (without teams)', async () => {

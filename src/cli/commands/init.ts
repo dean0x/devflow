@@ -1652,7 +1652,7 @@ export const initCommand = new Command('init')
       const complianceSummary = formatComplianceSummary(complianceEnabled, complianceFrameworks);
       const summaryLines = [
         `Ambient mode:    ${ambientEnabled ? 'enabled' : 'disabled'}`,
-        `Working memory:  ${memoryEnabled ? 'enabled' : 'disabled'}`,
+        `Working memory:  ${memoryEnabled ? 'enabled' : 'disabled (turn on: devflow memory --enable)'}`,
         `Curation:        ${curationEnabled ? 'enabled' : 'disabled'}`,
         `Rules:           ${rulesEnabled ? 'enabled' : 'disabled'}`,
         `HUD:             ${hudEnabled ? 'enabled' : 'disabled'}`,
@@ -1715,7 +1715,7 @@ export const initCommand = new Command('init')
       } else {
         p.note(workingMemoryNote(), 'Working Memory');
         const memoryChoice = await p.confirm({
-          message: 'Enable working memory? (Recommended)',
+          message: 'Enable working memory?',
           initialValue: seed.features.memory,
         });
         if (p.isCancel(memoryChoice)) {

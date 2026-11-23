@@ -26,8 +26,10 @@ if [ "$_JSON_AVAILABLE" = "false" ]; then dbg "EXIT: no json"; exit 0; fi
 
 INPUT=$(cat)
 
-FIELDS=$(printf '%s' "$INPUT" | json_extract_cwd_prompt)
+FIELDS=$(printf '%s' "$INPUT" | json_extract_cwd_sid_field "prompt") || { dbg "EXIT: extraction failed"; exit 0; }
 CWD="${FIELDS%%$'\001'*}"
+FIELDS="${FIELDS#*$'\001'}"
+SESSION_ID="${FIELDS%%$'\001'*}"
 PROMPT="${FIELDS#*$'\001'}"
 
 dbg "CWD=$CWD PROMPT_LENGTH=${#PROMPT}"
@@ -85,14 +87,17 @@ source "$SCRIPT_DIR/get-mtime" || { echo "capture-prompt: failed to source get-m
 source "$SCRIPT_DIR/curation-lock" || { echo "capture-prompt: failed to source curation-lock" >&2; exit 1; }
 
 # Each queue is checked from the root it lies below, and its folder created there,
-# by queue_append_row (D-HOOKS-NO-SYMLINK, git-marker).
+# by queue_append_both (D-HOOKS-NO-SYMLINK, git-marker).
 TS=$(date +%s)
 queue_append_both \
   "$PROJECT_ROOT" "$MEMORY_DIR/.pending-turns.jsonl" \
   "$LEDGER_ROOT" "$CURATION_DIR/.pending-turns.jsonl" \
   "$MEMORY_ENABLED" "$CURATION_ENABLED" \
-  "user" "$PROMPT" "$TS"
+  "user" "$PROMPT" "$TS" "$SESSION_ID"
 
 log "Captured user turn (${#PROMPT} chars)"
+if [ -z "$SESSION_ID" ]; then
+  log "Capture: no valid session_id"
+fi
 dbg "=== HOOK COMPLETE ==="
 exit 0

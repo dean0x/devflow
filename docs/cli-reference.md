@@ -18,7 +18,7 @@ Use `--recommended` or `--advanced` flags for non-interactive setup.
 |--------|-------------|
 | `--plugin <names>` | Comma-separated plugin names (e.g., `implement,code-review`) |
 | `--ambient` / `--no-ambient` | Enable/disable ambient mode — orchestrator charter + per-prompt reminder (default: on) |
-| `--memory` / `--no-memory` | Enable/disable working memory (default: on) |
+| `--memory` / `--no-memory` | Turn working memory on or off (default for new installs: off) |
 | `--curation` / `--no-curation` | Enable/disable curation (default: on); with curation off, init installs the curation-off prompts and not `devflow:apply-decisions` |
 | `--knowledge` / `--no-knowledge` | Enable/disable feature knowledge (default: on) |
 | `--rules` / `--no-rules` | Enable/disable rules (default: on) |
@@ -31,7 +31,7 @@ Use `--recommended` or `--advanced` flags for non-interactive setup.
 | `--hud-only` | Install only the HUD (no plugins, hooks, or extras) |
 | `--recommended` | Apply recommended defaults after plugin selection (skip advanced prompts) |
 | `--advanced` | Show all configuration prompts |
-| `--reset` | Factory reset — restore all defaults, ignoring prior installation state; mutually exclusive with `--plugin` |
+| `--reset` | Restore factory defaults, including working memory off. You can set `--memory` to turn it on. Do not combine `--reset` with `--plugin`. |
 | `--security <user\|managed\|none>` | Security deny list location (default: user) |
 | `--verbose` | Show detailed output |
 
@@ -139,6 +139,11 @@ The move skips a project, and changes nothing in it, when git tracks any entry u
 When git tracks a file in a curation data folder at the ledger root (the curation folder, the old ledger folder or a backup folder), or a `.git` entry stands and git does not answer, curation is paused for the project, and these commands read and write nothing there. `--status` prints the machine state line, then the fixed pause notice, and exits 0. `--list`, `--show`, `--restore`, `--reset`, `--clear` and `--configure` (project scope) print the notice as an error, change nothing and exit 1. They ask before they read a ledger file, take a lock or ask you to confirm. `--enable` and `--disable` are not refused: `--disable` records the switch and deletes no queue file. The notice holds nothing from the repository. When git tracks files, it says to run `git ls-files .devflow`, then `git rm --cached <file>` for the files that git lists, in the main checkout, and to delete them if you did not make them. When git did not answer, it says that the check runs again at the next session start, and that you should check that git runs in the project if the notice stays. The pause ends when the files are untracked: the next command or session start asks git again.
 
 ## Working Memory
+
+Working memory is off by default on new installs. A standard re-init keeps your choice.
+`devflow init --reset` restores the off default.
+The note has a limit of 8 KB (8,192 bytes). Use one worktree for each parallel session.
+See [Working Memory](working-memory.md) for the note format and restore rules.
 
 ```bash
 npx devflow-kit memory --enable           # Enable working memory in every project (a repository can opt out)

@@ -14,6 +14,7 @@
 //   get-string-field <field>              Read field from stdin JSON only when it is a string
 //   array-length <field>                  Count of an array field in stdin JSON; `unknown` for any other type
 //   extract-cwd-field <field>             Extract cwd + arbitrary field, SOH-byte delimited
+//   extract-cwd-sid-field <field>         Extract cwd + typed session ID + field, SOH-byte delimited
 //   session-output <context> [message]    Build SessionStart output envelope (+ systemMessage)
 //   prompt-output <context>               Build UserPromptSubmit output envelope
 //   backup-construct                      Build pre-compact backup JSON from --arg pairs
@@ -366,15 +367,24 @@ try {
       break;
     }
 
-    case 'extract-cwd-field': {
-      // Extract cwd and an arbitrary top-level field from hook JSON in one pass.
-      // Outputs: cwd + ASCII SOH (0x01) + field value (no trailing newline).
-      // Caller splits with bash parameter expansion on $'\001' (bash 3.2 safe).
+    case 'extract-cwd-field':
+    case 'extract-cwd-sid-field': {
       const field = args[0];
       const input = JSON.parse(readStdin());
       const cwd = input.cwd || '';
       const value = (field && input[field]) || '';
-      process.stdout.write(cwd + '\x01' + value);
+      if (op === 'extract-cwd-field') {
+        process.stdout.write(cwd + '\x01' + value);
+        break;
+      }
+      // Cwd must fit before the first SOH. The value can contain SOH bytes.
+      if (typeof cwd !== 'string' || cwd.includes('\0') || cwd.includes('\x01')) {
+        process.exitCode = 1;
+        break;
+      }
+      const id = input.session_id;
+      const sid = typeof id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(id) ? id : '';
+      process.stdout.write(cwd + '\x01' + sid + '\x01' + value);
       break;
     }
 

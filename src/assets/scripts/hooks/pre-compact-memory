@@ -40,6 +40,7 @@ dbg "CWD=$CWD"
 # Anchor .devflow/ to the project root (prevents a stray nested .devflow/ when this
 # hook runs with a CWD inside .devflow/...). Empty → fall back to CWD.
 source "$SCRIPT_DIR/resolve-project-root" 2>/dev/null || true
+source "$SCRIPT_DIR/memory-permission" || { echo "pre-compact-memory: failed to source memory-permission" >&2; exit 1; }
 PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
 [ -n "$PROJECT_ROOT" ] || PROJECT_ROOT="$CWD"
 
@@ -169,14 +170,10 @@ else
 fi
 
 # Bootstrap minimal WORKING-MEMORY.md if absent; skip on an unborn branch or a
-# malformed SHA. is_hex_sha 40 40: exactly 40 lowercase hex chars required. A detached
-# HEAD bootstraps with a `branch: (detached)` stamp (D-DETACHED-HEAD, above): the
-# stamp's memory-head SHA is what drift detection keys on, and the Context line names
-# the commit by its short SHA, so the first compaction there no longer leaves the
-# session with nothing to restore.
-# avoids REL-5: O_EXCL-style atomic create via noclobber so the existence test and the
-# create are one operation — if the worker's CAS mv lands in the window, noclobber fails
-# (file already exists) and we skip the bootstrap rather than truncating fresh memory.
+# malformed SHA. A detached HEAD gets a `branch: (detached)` stamp. The stamp's
+# SHA serves drift detection.
+# Create the note once with noclobber. If the worker has already put a note at
+# this path, the create fails and the worker's note stays in place.
 # D-HOOKS-NO-SYMLINK (git-marker): the create is made only where nothing stands, tested
 # with builtins first, since noclobber alone opens a link to a FIFO or a device (no
 # regular file stands there) and would wait on the FIFO or write the text into the
@@ -186,39 +183,11 @@ MEMORY_FILE="$MEMORY_DIR/WORKING-MEMORY.md"
 if [ -n "$GIT_BRANCH" ] && is_hex_sha "$GIT_HEAD_SHA" 40 40; then
   if [ -L "$MEMORY_FILE" ]; then
     log "Working memory not bootstrapped: $MEMORY_FILE is a symbolic link"
-  elif [ ! -e "$MEMORY_FILE" ] && (set -o noclobber; : > "$MEMORY_FILE") 2>/dev/null; then
-    {
-      echo "<!-- memory-head: $GIT_HEAD_SHA branch: $GIT_BRANCH -->"
-      echo ""
-      echo "## Now"
-      echo "- Session compacted before working memory was established"
-      echo ""
-      echo "## Progress"
-      echo "- (no history yet)"
-      echo ""
-      echo "## Decisions"
-      echo "- (none recorded)"
-      echo ""
-      echo "## Context"
-      if [ "$GIT_BRANCH" = "(detached)" ]; then
-        echo "- Branch: (detached) @ ${GIT_HEAD_SHA:0:7}"
-      else
-        echo "- Branch: $GIT_BRANCH"
-      fi
-      echo "$GIT_LOG" | head -3 | while IFS= read -r line; do
-        [ -n "$line" ] && echo "- $line"
-      done
-      if [ -n "$GIT_STATUS" ]; then
-        echo "- Modified files:"
-        echo "$GIT_STATUS" | head -10 | while IFS= read -r line; do
-          [ -n "$line" ] && echo "  - $(echo "$line" | awk '{print $2}')"
-        done
-      fi
-      echo ""
-      echo "## Session Log"
-      echo "- (no entries)"
-    } >> "$MEMORY_FILE"
-    dbg "Bootstrapped minimal WORKING-MEMORY.md with stamp and canonical sections"
+  elif [ ! -e "$MEMORY_FILE" ] && (umask 077 && set -o noclobber && {
+    memory_stamp_line "$GIT_HEAD_SHA" "$GIT_BRANCH" &&
+    printf '%s\n' '' '## Now' '- Session compacted before working memory was established' '' '## Progress' '- (no history yet)'
+  } > "$MEMORY_FILE") 2>/dev/null; then
+    dbg "Bootstrapped a note with a stamp and two sections"
   fi
 fi
 

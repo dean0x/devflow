@@ -5,6 +5,15 @@ import * as os from 'os';
 import { exec, execFileSync } from 'child_process';
 import { addMemoryHooks, removeMemoryHooks, hasMemoryHooks, countMemoryHooks, convergeMemoryHooks, cleanQueueFiles, CLEAN_QUEUE_POOL_LIMIT, hasMemoryDir, filterProjectsWithMemory, MEMORY_MIN_PERMISSION_VERSION, workingMemoryNote } from '../src/cli/commands/memory.js';
 import { probeTrackedArea } from '../src/core/tracked-areas.js';
+import * as prompts from '@clack/prompts';
+import { initCommand } from '../src/cli/commands/init.js';
+
+vi.mock(import('@clack/prompts'), async (importOriginal) => ({
+  ...await importOriginal(),
+  confirm: vi.fn(),
+  intro: vi.fn(),
+  note: vi.fn(),
+}));
 
 // A pass-through spy: every test below runs the real probe unless it swaps one in.
 vi.mock('../src/core/tracked-areas.js', async (importOriginal) => {
@@ -989,5 +998,34 @@ describe('the memory worker version floor', () => {
 
     expect(note).toContain('Preserves session context');
     expect(note).toContain('Applies to every project.');
+  });
+});
+
+describe('the init copy for working memory', () => {
+  it('asks whether to enable memory without a recommendation', async () => {
+    const stop = new Error('Stop at the first confirmation');
+    const confirm = vi.mocked(prompts.confirm).mockRejectedValueOnce(stop);
+    const stdin = process.stdin;
+    const isTTY = Object.getOwnPropertyDescriptor(stdin, 'isTTY');
+    Object.defineProperty(stdin, 'isTTY', { value: true, configurable: true });
+    try {
+      await initCommand.parseAsync(['--advanced', '--plugin', 'devflow-implement', '--no-ambient'], { from: 'user' })
+        .catch((error: unknown) => { if (error !== stop) throw error; });
+      expect(confirm).toHaveBeenCalledWith({ message: 'Enable working memory?', initialValue: false });
+    } finally {
+      if (isTTY) Object.defineProperty(stdin, 'isTTY', isTTY);
+      else Reflect.deleteProperty(stdin, 'isTTY');
+    }
+  });
+
+  it('advises one worktree for each parallel session', () => {
+    expect(workingMemoryNote()).toContain('Use one worktree for each parallel session.');
+  });
+
+  it('states the same note cap as the shell helper (TP-50)', async () => {
+    const hook = await fs.readFile(path.resolve(__dirname, '../src/assets/scripts/hooks/memory-permission'), 'utf-8');
+    const cap = hook.match(/^MEMORY_NOTE_CAP_BYTES=(\d+)$/m)?.[1];
+    expect(cap).toBe('8192');
+    expect(workingMemoryNote()).toContain(`(${Number(cap).toLocaleString('en-US')} bytes)`);
   });
 });

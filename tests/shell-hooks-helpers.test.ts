@@ -27,6 +27,7 @@ import {
   runHook,
   spawnWithStdin,
 } from './shell-hooks-helpers.js';
+import { isolatedEnv } from './setup/home-isolation.js';
 
 /** Several MiB: larger than any pipe buffer, so an unread write cannot complete. */
 const BIG = 'x'.repeat(8 * 1024 * 1024);
@@ -50,6 +51,7 @@ beforeAll(() => {
   exitsCleanEarly = script('exits-clean-early', 'echo early-out\necho early-err >&2\nexit 0');
   failsEarly = script('fails-early', 'echo fail-out\necho fail-err >&2\nexit 3');
   readsAll = script('reads-all', 'wc -c | tr -d " "');
+  script('claude', 'exit 99');
 });
 
 afterAll(() => {
@@ -184,18 +186,180 @@ describe('classifyStdinRun — the rule, on every shape', () => {
 const PERMISSION_HELPER = path.join(HOOKS_DIR, 'memory-permission');
 
 /** What one bash run printed; the body sees the helpers sourced and `$1...` as `args`. */
-function inHook(body: string, args: string[] = [], env: Record<string, string> = {}) {
+function inHook(body: string, args: string[] = [], env = process.env, timeout = 60_000) {
   const run = spawnSync('bash', [
     '-e', '-c',
-    'source "$1"; source "$2"; source "$3"; shift 3\n' + body,
+    'source "$1"; source "$2"; source "$3"; source "${1%/*}/is-hex-sha"; shift 3\n' + body,
     '_',
     path.join(HOOKS_DIR, 'resolve-project-root'),
     path.join(HOOKS_DIR, 'json-parse'),
     PERMISSION_HELPER,
     ...args,
-  ], { encoding: 'utf8', env: { ...process.env, ...env }, timeout: 60_000 });
+  ], { encoding: 'utf8', env, timeout });
   return { status: run.status, stdout: run.stdout, stderr: run.stderr };
 }
+
+function noteEnv(): NodeJS.ProcessEnv {
+  return isolatedEnv({ ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH ?? ''}` }, dir);
+}
+
+describe('memory-permission: the note cap', () => {
+  const measure = (files: string[]) => inHook(`for file in "$@"; do
+  if memory_note_within_cap "$file"; then rc=0; else rc=$?; fi
+  printf '%s:%s\\n' "$rc" "$MEMORY_NOTE_BYTES"
+done`, files, noteEnv(), FIFO_RUN_BOUND_MS);
+
+  it('counts bytes and accepts exactly 8192 bytes', () => {
+    const notes = ['', 'x'.repeat(8192), 'x'.repeat(8193), 'é'.repeat(4096) + '\n'];
+    const files = notes.map((note, index) => {
+      const file = path.join(dir, `note-${index}`);
+      fs.writeFileSync(file, note);
+      return file;
+    });
+
+    expect(measure(files)).toEqual({ status: 0, stdout: '0:0\n0:8192\n1:8193\n1:8193\n', stderr: '' });
+  });
+
+  it('refuses a FIFO, a folder, a link, and a missing file before the size read (TP-13)', () => {
+    const fifo = path.join(dir, 'note-fifo');
+    const link = path.join(dir, 'note-link');
+    const missing = path.join(dir, 'note-missing');
+    fs.symlinkSync(exitsCleanEarly, link);
+    makeFifo(fifo);
+
+    expect(measure([fifo, dir, link, missing])).toEqual({
+      status: 0, stdout: '1:unknown\n'.repeat(4), stderr: '',
+    });
+  }, FIFO_RUN_BOUND_MS + 5_000);
+
+  it('refuses failed, empty, oversized digit counts and malformed size results (TP-13)', () => {
+    const counts = inHook(String.raw`
+wc() {
+  printf ' %s\t\n' "$count"
+  [ "$count" != 123 ] || { echo 'read failed' >&2; return 1; }
+}
+for count in 0 0008192 '' 00008192 '8 192' 8192x 123; do
+  if memory_note_within_cap "$1"; then rc=0; else rc=$?; fi
+  printf '%s:%s\n' "$rc" "$MEMORY_NOTE_BYTES"
+done`, [exitsCleanEarly], noteEnv());
+
+    expect(counts).toEqual({ status: 0, stdout: '0:0\n0:0008192\n' + '1:unknown\n'.repeat(5), stderr: '' });
+  });
+});
+
+describe('memory-permission: the note stamp', () => {
+  const sha = 'abcde09';
+  const prefix = `<!-- memory-head: ${sha} branch: `;
+
+  it('writes the old stamp without an epoch and keeps the branch token at its cap', () => {
+    const branch = 'feat/' + 'a'.repeat(195);
+    const result = inHook('memory_stamp_line "$1" "(detached)"; memory_stamp_line "$1" "$2" 1234567890', [sha, branch], noteEnv());
+
+    expect(result).toEqual({
+      status: 0, stdout: `${prefix}(detached) -->\n${prefix}${branch} multi: 1234567890 -->\n`, stderr: '',
+    });
+  });
+
+  it('substitutes unknown for a bad SHA or branch and omits a bad epoch', () => {
+    const branches = ['', 'two tokens', 'has\tTab', 'has\nLine', 'has\u007fDEL', 'a'.repeat(201)];
+    const result = inHook('for branch in "$@"; do memory_stamp_line not-hex "$branch" 12345678901; done', branches, noteEnv());
+
+    expect(result).toEqual({ status: 0, stdout: '<!-- memory-head: unknown branch: unknown -->\n'.repeat(branches.length), stderr: '' });
+  });
+
+  it('writes the session ID before the epoch and omits an invalid session ID', () => {
+    const id = `s-1_${'A'.repeat(60)}`;
+    const result = inHook(`memory_stamp_line "$1" main 1234567890 "$2"; memory_stamp_line "$1" main "" "$2"
+for bad in "" "bad.id" "two ids" "$3"; do memory_stamp_line "$1" main 9 "$bad"; done`, [sha, id, `${id}x`], noteEnv());
+
+    expect(result).toEqual({
+      status: 0,
+      stdout: `${prefix}main session: ${id} multi: 1234567890 -->\n${prefix}main session: ${id} -->\n` +
+        `${prefix}main multi: 9 -->\n`.repeat(4),
+      stderr: '',
+    });
+  });
+
+  it('parses the old and new formats, clears previous fields, and refuses invalid fields', () => {
+    const result = inHook(`for line in "$@"; do
+  memory_stamp_parse "$line"
+  printf '%s|%s|%s|%s\\n' "$STAMP_SHA" "$STAMP_BRANCH" "$STAMP_MULTI" "$STAMP_SESSION"
+done`, [
+      `${prefix}feat/local multi: 00009 -->`, `${prefix}(detached) -->`,
+      `${prefix}two tokens multi: 09 -->`, `${prefix}has\tTab multi: 9x -->`,
+      `${prefix}${'a'.repeat(201)} -->`, '<!-- memory-head: bad branch: main -->',
+      `${prefix}main --> extra`, `${prefix}main session: s-1_A multi: 00009 -->`,
+      `${prefix}main session: s-1_A -->`, `${prefix}main session: bad.id multi: 7 -->`,
+      `${prefix}main session: ${'s'.repeat(65)} -->`,
+    ], noteEnv());
+
+    expect(result).toEqual({
+      status: 0,
+      stdout: `${sha}|feat/local|00009|\n${sha}|(detached)||\n${sha}||09|\n${sha}|||\n${sha}|||\n|main||\n|||\n` +
+        `${sha}|main|00009|s-1_A\n${sha}|main||s-1_A\n${sha}|main|7|\n${sha}|main||\n`,
+      stderr: '',
+    });
+  });
+
+  it('carries a decimal mark for less than four hours and refuses expired or future marks', () => {
+    const result = inHook(`for now in "$@"; do
+  epoch=$(memory_multi_epoch_from_line "$STAMP" "$now")
+  printf '[%s]\\n' "$epoch"
+done`, ['00009', '14408', '14409', '00008', 'invalid'], {
+      ...noteEnv(), STAMP: `${prefix}main multi: 00009 -->`,
+    });
+
+    expect(result).toEqual({ status: 0, stdout: '[00009]\n[00009]\n[]\n[]\n[]\n', stderr: '' });
+  });
+});
+
+describe('json_extract_cwd_sid_field (TP-28)', () => {
+  const hasJq = spawnSync('jq', ['--version'], { encoding: 'utf8' }).status === 0;
+
+  for (const useJq of [true, false]) {
+    const extract = (events: object[]) => inHook(`
+_HAS_JQ="$1"; shift
+for input in "$@"; do
+  row=$(printf '%s' "$input" | json_extract_cwd_sid_field prompt && printf x) || exit 1
+  printf '%s\\0' "\${row%x}"
+done`, [String(useJq), ...events.map((event) => JSON.stringify(event))], noteEnv());
+
+    describe.skipIf(useJq && !hasJq)(useJq ? 'jq' : 'node fallback', () => {
+      it('keeps the path and value and emits only valid session IDs', () => {
+        const cwd = '/project path';
+        const prompt = 'tab\tbackslash\\ SOH\x01 DEL\x7f é\n';
+        const limit = 'a'.repeat(64);
+        const ids = [
+          'Z', 'A-b_09', limit, undefined, '', null, false, 42, {}, ['A'],
+          'a\n', 'a\t', 'a\x01b', 'a\x7fb', 'a\0b', '../a', 'é', 'a'.repeat(65),
+        ];
+        const result = extract(ids.map((session_id) => ({ cwd, prompt, session_id })));
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.stderr).toBe('');
+        const rows = result.stdout.split('\0').slice(0, -1).map((row) => {
+          const [pathField, sid, ...value] = row.split('\x01');
+          return [pathField, sid, value.join('\x01')];
+        });
+
+        expect(rows).toEqual(ids.map((_, i) => [cwd, ['Z', 'A-b_09', limit][i] ?? '', prompt]));
+      }, 60_000);
+
+      it('prints empty fields for an absent path or value', () => {
+        expect(extract([{ session_id: 'a' }, { cwd: '/project', prompt: null }])).toEqual({
+          status: 0, stdout: '\x01a\x01\0/project\x01\x01\0', stderr: '',
+        });
+      });
+
+      it('refuses a path with a field delimiter or a NUL byte', () => {
+        for (const cwd of ['/project\x01part', '/project\0part']) {
+          expect(extract([{ cwd, session_id: 'a', prompt: 'turn' }])).toEqual({
+            status: 1, stdout: '', stderr: '',
+          });
+        }
+      });
+    });
+  }
+});
 
 describe('memory-permission: staged_path_safe', () => {
   const safe = (...paths: string[]): string[] =>
@@ -691,7 +855,7 @@ describe('memory-permission: the one-time notice', () => {
    */
   const run = (body: string, area: string | null = 'untracked') => {
     const prelude = area === null ? '' : `DF_TRACKED_AREA_MEMORY='${area}'; `;
-    const result = inHook(`${prelude}MEM="$1"; ROOT="$2"; LOGF="$3"; log() { printf '%s\\n' "$1" >> "$LOGF"; }\n${body}`, [memory, root, logFile]);
+    const result = inHook(`${prelude}MEM="$1"; ROOT="$2"; LOGF="$3"; log() { printf '%s\\n' "$1" >> "$LOGF"; }\n${body}`, [memory, root, logFile], noteEnv());
     expect(result.stderr, 'nothing on stderr').toBe('');
     expect(result.status, result.stderr).toBe(0);
     return result.stdout;
@@ -721,7 +885,7 @@ describe('memory-permission: the one-time notice', () => {
     run('memory_notice_write "$MEM" "$ROOT" path');
 
     const first = read('/home/u/.devflow/logs/p/.background-memory-update.log');
-    expect(first).toContain('project path');
+    expect(first).toContain('a project path blocks the working memory update');
     expect(first).toContain('/home/u/.devflow/logs/p/.background-memory-update.log');
     expect(first, 'it names the folder the log sits in').toContain('under ~/.devflow/logs/, in the folder for the session that ran it');
     expect(fs.existsSync(pending('path')), 'moved').toBe(false);
@@ -889,6 +1053,37 @@ describe('memory-permission: the one-time notice', () => {
     expect(fs.existsSync(pending('denied')), 'one denied run after the reset raises nothing').toBe(false);
   });
 
+  it('counts note refusals apart from denied runs and leaves the notice to the caller (TP-15)', () => {
+    const marker = path.join(memory, '.worker-note-once');
+    const noteRefusal = 'memory_refusal_seen "$MEM" "$ROOT" note; printf "%s" "$MEMORY_REFUSAL_COUNT"';
+    run('memory_denied_seen "$MEM" "$ROOT"');
+
+    expect(run(noteRefusal)).toBe('first');
+    expect(fs.statSync(marker).mode & 0o777).toBe(0o600);
+    expect(run(noteRefusal)).toBe('second');
+    expect(fs.existsSync(marker)).toBe(true);
+    expect(fs.existsSync(pending('note'))).toBe(false);
+
+    run('memory_notice_write "$MEM" "$ROOT" note');
+    expect(read()).toContain('The worker kept the previous note.');
+    expect(read()).toBe('');
+    run('memory_notice_clear "$MEM" "$ROOT" note');
+    expect(fs.existsSync(shown('note'))).toBe(false);
+    expect(fs.existsSync(marker)).toBe(false);
+    expect(run(noteRefusal)).toBe('first');
+  });
+
+  it('reports no count when the area is paused and a blocked count for a folder at the marker', () => {
+    const marker = path.join(memory, '.worker-note-once');
+    const noteRefusal = 'memory_refusal_seen "$MEM" "$ROOT" note; printf "%s" "$MEMORY_REFUSAL_COUNT"';
+
+    expect(run(noteRefusal, 'tracked')).toBe('none');
+    expect(fs.readdirSync(memory)).toEqual([]);
+    fs.mkdirSync(marker);
+    expect(run(noteRefusal)).toBe('blocked');
+    expect(fs.statSync(marker).isDirectory()).toBe(true);
+  });
+
   it('writes nothing when the memory folder does not exist', () => {
     fs.rmSync(memory, { recursive: true });
     run('memory_notice_write "$MEM" "$ROOT" path\nmemory_denied_seen "$MEM" "$ROOT"\nmemory_notice_clear "$MEM" "$ROOT" path');
@@ -906,6 +1101,15 @@ describe('memory-permission: the one-time notice', () => {
     it('leaves no notice and no denied-run marker, however often the worker asks', () => {
       run('memory_notice_write "$MEM" "$ROOT" path\nmemory_notice_write "$MEM" "$ROOT" denied\nmemory_denied_seen "$MEM" "$ROOT"\nmemory_denied_seen "$MEM" "$ROOT"', area);
       expect(fs.readdirSync(memory)).toEqual([]);
+    });
+
+    it('keeps the notice and its two markers', () => {
+      const files = [pending('note'), shown('note'), path.join(memory, '.worker-note-once')];
+      for (const file of files) fs.writeFileSync(file, 'x');
+
+      run('memory_notice_clear "$MEM" "$ROOT" note\nmemory_notice_clear "$MEM" "$ROOT" denied', area);
+
+      expect(fs.readdirSync(memory).sort()).toEqual(files.map((file) => path.basename(file)).sort());
     });
   });
 });
