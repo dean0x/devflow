@@ -1,12 +1,17 @@
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, sep } from 'node:path';
+import { forecastFrom } from '@dean0x/tokenmeter/dist/analysis.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { installTokenmeterState } from '../src/core/tokenmeter-bin.js';
+import { installTokenmeterState, resolvePackageBin } from '../src/core/tokenmeter-bin.js';
+import { forecastPercentText, parseWeekPoint, weekForecastFrom } from '../src/hud/components/week-forecast.js';
 import { gatherTokenmeterUsage } from '../src/hud/tokenmeter.js';
+import { assertTempHome } from './setup/home-isolation.js';
 
-// Both contract cases took 744 ms total in isolation. Allow a 7 s Node start stall per process.
+// Both Codex cases took 744 ms total in isolation. Allow a 7 s Node start stall per process.
 const CHILD_DEADLINE_MS = 10_000;
 // The app-server case starts the refresher and two fake Codex processes in sequence.
 const REFRESH_TIMEOUT_MS = 30_000;
@@ -104,5 +109,75 @@ describe.skipIf(process.platform === 'win32')('pinned tokenmeter HUD contract', 
       { ...expected, arg: '--version' },
       { ...expected, arg: 'app-server' },
     ]);
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('pinned tokenmeter week forecast contract', { timeout: TEST_TIMEOUT_MS }, () => {
+  const hourMs = 3_600_000;
+  const nowMs = 1_800_000_000_000;
+  const startLimitReset = nowMs + 163 * hourMs - 144_000;
+  const midweekReset = nowMs + 84 * hourMs;
+
+  it.each([
+    ['one millisecond before the start limit', 1, startLimitReset, nowMs - 1],
+    ['at the start limit', 1, startLimitReset, nowMs],
+    ['at 0% used', 0, midweekReset, nowMs],
+    ['at 100% used', 100, midweekReset, nowMs],
+    ['with run-out at reset', 50, midweekReset, nowMs],
+    // Run-out is less than half a millisecond after reset, before rounding.
+    ['with run-out just after reset', 49.99999998, midweekReset, nowMs],
+  ] as const)('matches the tokenmeter forecast values %s', (_label, usedPercent, resetsAtMs, at) => {
+    const point = parseWeekPoint({ used_percentage: usedPercent, resets_at: resetsAtMs / 1000 }, at);
+    assert(point, 'The HUD must accept the week reading');
+    const upstream: { atResetPct: number; runsOutAt: number | null } | null =
+      forecastFrom({ usedPercent, resetsAt: resetsAtMs, at });
+    expect(weekForecastFrom(point, at)).toEqual(upstream && {
+      atResetPct: upstream.atResetPct,
+      runsOutAtMs: upstream.runsOutAt,
+    });
+  });
+
+  it.each([
+    ['with no run-out', 40, 84, ' | 80% by reset'],
+    ['with a run-out', 80, 82, ' | 156% by reset, runs out in 21h'],
+    ['two hours into the week', 40, 166, ''],
+    ['above the display cap', 60, 158, ' | >999% by reset, runs out in 6h'],
+  ] as const)('matches the HUD forecast %s', async (_label, percent, hoursLeft, expectedSuffix) => {
+    const bin = await resolvePackageBin('@dean0x/tokenmeter', 'tokenmeter');
+    if (!bin.ok) assert.fail(bin.error);
+    const home = await mkdtemp(join(root, 'home-'));
+    const dataDir = await realpath(await mkdtemp(join(root, 'data-')));
+    assertTempHome(home);
+    expect(isAbsolute(dataDir)).toBe(true);
+    expect(dataDir.startsWith(root + sep)).toBe(true);
+
+    const nowMs = Date.now();
+    const sevenDay = { used_percentage: percent, resets_at: Math.floor((nowMs + hoursLeft * hourMs) / 1000) };
+    const child = spawnSync(process.execPath, [bin.value.binPath, 'statusline'], {
+      input: JSON.stringify({ rate_limits: { seven_day: sevenDay } }),
+      env: { HOME: home, TOKENMETER_DATA_DIR: dataDir },
+      cwd: home,
+      encoding: 'utf-8',
+      timeout: CHILD_DEADLINE_MS,
+    });
+
+    expect(child.error).toBeUndefined();
+    expect(child.status).toBe(0);
+    expect(child.stderr).toBe('');
+    expect(child.stdout.trim()).toBe(`Claude wk ${percent}%${expectedSuffix}`);
+
+    const match = /(\d+|>999)% by reset(?:, runs out in (\d+)h)?/.exec(child.stdout);
+    const tokenmeter = match && {
+      percent: `${match[1]}%`,
+      hours: match[2] === undefined ? undefined : Number(match[2]),
+    };
+    const point = parseWeekPoint(sevenDay, nowMs);
+    assert(point, 'The HUD must accept the week reading');
+    const forecast = weekForecastFrom(point, nowMs);
+    const hud = forecast && {
+      percent: forecastPercentText(forecast.atResetPct),
+      hours: forecast.runsOutAtMs === null ? undefined : Math.floor((forecast.runsOutAtMs - nowMs) / hourMs),
+    };
+    expect(hud).toEqual(tokenmeter);
   });
 });

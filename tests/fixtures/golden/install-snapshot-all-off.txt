@@ -368,6 +368,7 @@ d .devflow/scripts/hud/components/
 - .devflow/scripts/hud/components/todo-progress.js
 - .devflow/scripts/hud/components/usage-quota.js
 - .devflow/scripts/hud/components/version-badge.js
+- .devflow/scripts/hud/components/week-forecast.js
 - .devflow/scripts/hud/components/worktree-count.js
 - .devflow/scripts/hud/config.js
 - .devflow/scripts/hud/cost-history.js

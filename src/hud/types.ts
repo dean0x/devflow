@@ -33,6 +33,7 @@ export type ComponentId =
   | 'versionBadge'
   | 'sessionDuration'
   | 'usageQuota'
+  | 'weekForecast'
   | 'codexQuota'
   | 'todoProgress'
   | 'configCounts'
@@ -47,6 +48,7 @@ export type ComponentId =
 export interface HudConfig {
   enabled: boolean;
   detail: boolean;
+  forecast: boolean;
 }
 
 /**

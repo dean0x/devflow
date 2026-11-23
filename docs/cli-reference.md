@@ -382,7 +382,17 @@ npx devflow-kit hud --enable         # Enable HUD
 npx devflow-kit hud --disable        # Disable HUD
 npx devflow-kit hud --detail         # Show tool/agent descriptions
 npx devflow-kit hud --no-detail      # Hide tool/agent descriptions
+npx devflow-kit hud --forecast       # Show the Claude week forecast
+npx devflow-kit hud --no-forecast    # Hide the Claude week forecast
 ```
+
+`--status` reports the forecast choice. It applies no changes, even with other flags. You can combine a detail flag and a forecast flag with `--enable` or `--disable`.
+
+**Claude week forecast.** The forecast is off by default. Devflow saves your choice in the `forecast` field of `~/.devflow/hud.json`. `devflow init` keeps your choice. When the HUD and forecast are on, the `weekForecast` component shows estimated quota use at reset in dim text after `7d`. If the rounded estimate exceeds 999%, the HUD shows `>999%`. If the quota will run out by reset, the HUD also shows how long it will last. At 100% used, the HUD omits the countdown.
+
+The HUD uses the same formula as the tokenmeter forecast, but it needs no tokenmeter data. The forecast starts no process and reads no extra file. The HUD uses `rate_limits.seven_day` from the current Claude Code session's JSON on stdin. It treats the value as current at each update.
+
+The forecast needs a quota value from 0% to 100% and a future reset time in epoch seconds. The reset must be no more than eight days away. If `rate_limits` is absent or the week data is absent or invalid, the HUD omits only the forecast. The HUD also omits it for about the first five hours of the quota week.
 
 The HUD shows the weekly Codex quota next to the Claude quota. It also shows the 5-hour Codex quota if your plan has one. When the HUD cache expires, devflow runs `tokenmeter hud` from the path that `devflow init` saves. The cache usually lasts 30 seconds. For readings at least 60 seconds old but less than 10 minutes old, the cache lasts at most 5 seconds.
 
