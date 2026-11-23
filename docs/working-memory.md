@@ -25,8 +25,8 @@ SessionStart restores the note only from `WORKING-MEMORY.md`. It can show a refr
 For the header states and worker notices, see [Working Memory hooks](reference/hooks.md#working-memory).
 
 Use one worktree for each parallel session. All sessions in the same worktree share one note and one memory queue.
-If rows with different session IDs interleave in one batch, the note header says it holds more than one session.
-The header shows this advice for four hours after the last interleave. The worker does not mark interleaves across batches.
+If two sessions write the note, in one batch or in separate batches, the note header says it holds more than one session.
+The header shows this advice for four hours after the last batch that mixes sessions.
 
 ## Enable / Disable
 

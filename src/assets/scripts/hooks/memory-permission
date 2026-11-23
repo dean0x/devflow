@@ -221,22 +221,31 @@ _memory_stamp_branch_valid() {
   return 0
 }
 
-# memory_stamp_line <sha> <branch> [<epoch>] — prints one note stamp.
+# A session ID has the queue row format: 1 to 64 of A-Z, a-z, 0-9, _ and -.
+_memory_stamp_session_valid() {
+  case "${1:-}" in ''|*[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-]*) return 1 ;; esac
+  [ "${#1}" -le 64 ] || return 1
+  return 0
+}
+
+# memory_stamp_line <sha> <branch> [<epoch> [<session>]] — prints one note stamp.
+# The session is the ID of the last session that wrote the note.
 memory_stamp_line() {
-  local _sha="${1:-}" _branch="${2:-}" _multi="" _MEMORY_FIELD
+  local _sha="${1:-}" _branch="${2:-}" _multi="" _session="" _MEMORY_FIELD
   is_hex_sha "$_sha" || _sha="unknown"
   _memory_stamp_branch_valid "$_branch" || _branch="unknown"
   _memory_field_within digits "${3:-}" 10
   if [ "$_MEMORY_FIELD" != "unknown" ]; then _multi=" multi: $_MEMORY_FIELD"; fi
-  printf '<!-- memory-head: %s branch: %s%s -->\n' "$_sha" "$_branch" "$_multi"
+  if _memory_stamp_session_valid "${4:-}"; then _session=" session: $4"; fi
+  printf '<!-- memory-head: %s branch: %s%s%s -->\n' "$_sha" "$_branch" "$_session" "$_multi"
   return 0
 }
 
-# memory_stamp_parse <line> — sets STAMP_SHA, STAMP_BRANCH and STAMP_MULTI.
+# memory_stamp_parse <line> — sets STAMP_SHA, STAMP_BRANCH, STAMP_SESSION and STAMP_MULTI.
 # Each field that does not fit the format is empty. No subprocesses.
 memory_stamp_parse() {
   local _line="${1:-}" _sha _branch _MEMORY_FIELD
-  STAMP_SHA=""; STAMP_BRANCH=""; STAMP_MULTI=""
+  STAMP_SHA=""; STAMP_BRANCH=""; STAMP_SESSION=""; STAMP_MULTI=""
   case "$_line" in
     "<!-- memory-head: "*" branch: "*" -->") ;;
     *) return 0 ;;
@@ -250,6 +259,12 @@ memory_stamp_parse() {
       _memory_field_within digits "${_branch#*" multi: "}" 10
       if [ "$_MEMORY_FIELD" != "unknown" ]; then STAMP_MULTI="$_MEMORY_FIELD"; fi
       _branch=${_branch%%" multi: "*}
+      ;;
+  esac
+  case "$_branch" in
+    *" session: "*)
+      if _memory_stamp_session_valid "${_branch#*" session: "}"; then STAMP_SESSION="${_branch#*" session: "}"; fi
+      _branch=${_branch%%" session: "*}
       ;;
   esac
   if is_hex_sha "$_sha"; then STAMP_SHA="$_sha"; fi

@@ -28,7 +28,7 @@ const FARM_TOOLS = [
   'printf', 'rm', 'rmdir', 'sed', 'sleep', 'stat', 'tail', 'touch', 'tr', 'wc',
 ] as const;
 const writeFakeExecutable = useWarmFakeExecutables();
-const INTERLEAVE_LOG = 'Queue rows interleave across sessions';
+const MIXED_LOG = 'The note holds turns of more than one session';
 const NOTE_CAP = 8192;
 const PLACEHOLDER = '<!-- memory-head: (set by devflow) -->';
 const BODY = '## Now\nTest note\n## Progress\n';
@@ -40,7 +40,7 @@ const SWAP = '.WORKING-MEMORY.md.swap';
 const ONCE = '.worker-note-once';
 const NOTICE = '.worker-notice-note';
 const MARKER = '0123456789abcdef';
-const UNBORN_STAMP = '<!-- memory-head: unknown branch: note-test -->';
+const UNBORN_STAMP = '<!-- memory-head: unknown branch: note-test session: test-session_1 -->';
 const MALFORMED_STAMPS = [
   ['a non-digit mark', 'note-test multi: invalid-mark'],
   ['extra stamp text', 'note-test extra-stamp-text'],
@@ -239,7 +239,7 @@ exec /bin/rm "$@"
     fs.appendFileSync(queue, row('assistant', 'New B reply', B) + '\n');
     writeClaudeStub();
     const { turns, log } = runQueue();
-    expect(log).not.toContain(INTERLEAVE_LOG);
+    expect(log).toContain(MIXED_LOG);
     expect(turns).toEqual([
       ...Array<string>(3).fill('Assistant: Repeated reply'),
       'Assistant: First B reply',
@@ -273,14 +273,14 @@ exec /bin/rm "$@"
       'Q&A: Q: Pick a color A: Blue',
       'User: Second prompt\nAssistant: Second reply',
     ]);
-    expect(log).toContain(INTERLEAVE_LOG);
+    expect(log).toContain(MIXED_LOG);
     for (const id of [A, B]) {
       expect(prompt).not.toContain(id);
       expect(log).not.toContain(id);
     }
   }, budget);
 
-  it('marks an interleave across the turn window but sends only the newest 20 rows', () => {
+  it('marks a second session outside the turn window but sends only the newest 20 rows', () => {
     const rows = [row('user', 'Outside window', A), row('assistant', 'Outside window', B),
       ...Array.from({ length: 20 }, (_, i) => row('assistant', `Recent reply ${i}`, A))];
     const { turns, prompt } = runQueue(rows);
@@ -289,8 +289,49 @@ exec /bin/rm "$@"
     expect(startContext()).toContain('more than one session');
   }, budget);
 
-  it('does not mark consecutive sessions or pair a legacy row with a tagged row', () => {
-    const { turns, log } = runQueue([
+  function stamp(): string {
+    return fs.readFileSync(note, 'utf8').split('\n')[0] ?? '';
+  }
+
+  it('marks two consecutive sessions in one batch and stamps the newest session', () => {
+    const { log } = runQueue([row('assistant', 'First reply', A), row('assistant', 'Second reply', B)]);
+
+    expect(log).toContain(MIXED_LOG);
+    expect(stamp()).toMatch(new RegExp(` session: ${B} multi: \\d+ -->$`));
+    const context = startContext();
+    expect(context.split('\n')[0]).toContain('more than one session');
+    expect(context).not.toContain(A);
+    expect(context).not.toContain(B);
+  }, budget);
+
+  it('marks a second session that writes the note in a separate batch', () => {
+    expect(runQueue(ONE_SESSION).log).not.toContain(MIXED_LOG);
+    expect(stamp()).toMatch(new RegExp(` session: ${A} -->$`));
+    expect(startContext()).not.toContain('more than one session');
+
+    expect(runQueue([row('assistant', 'Other reply', B)]).log).toContain(MIXED_LOG);
+    expect(stamp()).toMatch(new RegExp(` session: ${B} multi: \\d+ -->$`));
+    expect(startContext().split('\n')[0]).toContain('more than one session');
+  }, budget);
+
+  it('does not mark one session across batches or a batch of rows with no ID', () => {
+    for (const rows of [ONE_SESSION, [row('assistant', 'Legacy reply')], ONE_SESSION]) {
+      expect(runQueue(rows).log).not.toContain(MIXED_LOG);
+      expect(stamp()).toMatch(new RegExp(` session: ${A} -->$`));
+    }
+    expect(startContext()).not.toContain('more than one session');
+  }, budget);
+
+  it('adds the session to a note stamp from before the session field without a mark', () => {
+    fs.writeFileSync(note, `<!-- memory-head: ${'a'.repeat(40)} branch: note-test -->\n${OLD_NOTE}`);
+
+    expect(runQueue([row('assistant', 'Other reply', B)]).log).not.toContain(MIXED_LOG);
+    expect(stamp()).toBe(`<!-- memory-head: unknown branch: note-test session: ${B} -->`);
+    expect(startContext()).not.toContain('more than one session');
+  }, budget);
+
+  it('pairs a legacy row only with a legacy row', () => {
+    const { turns } = runQueue([
       row('user', 'Legacy prompt'),
       row('assistant', 'Tagged reply', A),
       row('assistant', 'Legacy reply'),
@@ -303,7 +344,6 @@ exec /bin/rm "$@"
       'User: Legacy prompt\nAssistant: Legacy reply',
       'User: Tagged prompt\nAssistant: Matching reply',
     ]);
-    expect(log).not.toContain(INTERLEAVE_LOG);
   }, budget);
 
   it('counts a question from a second session without taking the first session prompt', () => {
@@ -314,7 +354,7 @@ exec /bin/rm "$@"
     ]);
 
     expect(turns).toEqual(['Q&A: Q: Which file? A: The first', 'User: Prompt\nAssistant: Reply']);
-    expect(log).toContain(INTERLEAVE_LOG);
+    expect(log).toContain(MIXED_LOG);
   }, budget);
 
   it('treats invalid IDs as absent without changing the count of unreadable rows', () => {
@@ -338,7 +378,7 @@ exec /bin/rm "$@"
       ...literals.map((_, index) => `User: Legacy prompt ${index}\nAssistant: Legacy reply ${index}`),
     ]);
     expect(log).toContain('Skipped 2 queue line(s) that hold no readable turn');
-    expect(log).not.toContain(INTERLEAVE_LOG);
+    expect(log).not.toContain(MIXED_LOG);
     expect({ project: fs.readdirSync(project).sort(), memory: fs.readdirSync(memoryDir).sort() }).toEqual({
       project: ['.devflow', '.git'],
       memory: ['.last-refresh-ok', 'WORKING-MEMORY.md'],
@@ -427,7 +467,7 @@ exec /bin/rm "$@"
 
   it('writes its own stamp, allows deeper headings, and accepts exactly 8192 bytes', () => {
     git('-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '--allow-empty', '-qm', 'start');
-    const stamp = `<!-- memory-head: ${git('rev-parse', 'HEAD')} branch: note-test -->\n`;
+    const stamp = `<!-- memory-head: ${git('rev-parse', 'HEAD')} branch: note-test session: ${A} -->\n`;
     const body = `${BODY}### Detail\n`;
     const exactBody = body + 'x'.repeat(NOTE_CAP - stamp.length - body.length);
     writeClaudeStub(`<!-- memory-head: fake branch: other -->\n${exactBody}`);

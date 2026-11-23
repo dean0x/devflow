@@ -267,19 +267,37 @@ describe('memory-permission: the note stamp', () => {
     expect(result).toEqual({ status: 0, stdout: '<!-- memory-head: unknown branch: unknown -->\n'.repeat(branches.length), stderr: '' });
   });
 
+  it('writes the session ID before the epoch and omits an invalid session ID', () => {
+    const id = `s-1_${'A'.repeat(60)}`;
+    const result = inHook(`memory_stamp_line "$1" main 1234567890 "$2"; memory_stamp_line "$1" main "" "$2"
+for bad in "" "bad.id" "two ids" "$3"; do memory_stamp_line "$1" main 9 "$bad"; done`, [sha, id, `${id}x`], noteEnv());
+
+    expect(result).toEqual({
+      status: 0,
+      stdout: `${prefix}main session: ${id} multi: 1234567890 -->\n${prefix}main session: ${id} -->\n` +
+        `${prefix}main multi: 9 -->\n`.repeat(4),
+      stderr: '',
+    });
+  });
+
   it('parses the old and new formats, clears previous fields, and refuses invalid fields', () => {
     const result = inHook(`for line in "$@"; do
   memory_stamp_parse "$line"
-  printf '%s|%s|%s\\n' "$STAMP_SHA" "$STAMP_BRANCH" "$STAMP_MULTI"
+  printf '%s|%s|%s|%s\\n' "$STAMP_SHA" "$STAMP_BRANCH" "$STAMP_MULTI" "$STAMP_SESSION"
 done`, [
       `${prefix}feat/local multi: 00009 -->`, `${prefix}(detached) -->`,
       `${prefix}two tokens multi: 09 -->`, `${prefix}has\tTab multi: 9x -->`,
       `${prefix}${'a'.repeat(201)} -->`, '<!-- memory-head: bad branch: main -->',
-      `${prefix}main --> extra`,
+      `${prefix}main --> extra`, `${prefix}main session: s-1_A multi: 00009 -->`,
+      `${prefix}main session: s-1_A -->`, `${prefix}main session: bad.id multi: 7 -->`,
+      `${prefix}main session: ${'s'.repeat(65)} -->`,
     ], noteEnv());
 
     expect(result).toEqual({
-      status: 0, stdout: `${sha}|feat/local|00009\n${sha}|(detached)|\n${sha}||09\n${sha}||\n${sha}||\n|main|\n||\n`, stderr: '',
+      status: 0,
+      stdout: `${sha}|feat/local|00009|\n${sha}|(detached)||\n${sha}||09|\n${sha}|||\n${sha}|||\n|main||\n|||\n` +
+        `${sha}|main|00009|s-1_A\n${sha}|main||s-1_A\n${sha}|main|7|\n${sha}|main||\n`,
+      stderr: '',
     });
   });
 

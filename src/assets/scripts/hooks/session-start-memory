@@ -254,7 +254,8 @@ render_memory_context() {
         *$'\n'*) MEMORY_BODY=${MEMORY_CONTENT#*$'\n'} ;;
       esac
       if [ -z "$STAMP_SHA" ] || [ -z "$STAMP_BRANCH" ] ||
-          { [[ "$FIRST_LINE" == *' multi: '* ]] && [ -z "$STAMP_MULTI" ]; }; then
+          { [[ "$FIRST_LINE" == *' multi: '* ]] && [ -z "$STAMP_MULTI" ]; } ||
+          { [[ "$FIRST_LINE" == *' session: '* ]] && [ -z "$STAMP_SESSION" ]; }; then
         dbg "Memory stamp has a field that did not pass the format check"
       fi
       ;;

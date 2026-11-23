@@ -756,12 +756,12 @@ TURNS_TEXT=""
 TURN_COUNT=0
 CURRENT_USER=""
 CURRENT_USER_SID="."
+FIRST_SID=""
 LAST_SID=""
-CLOSED_SIDS=""
-INTERLEAVED="false"
+MIXED_SESSIONS="false"
 
 # Flush the pending prompt on a new prompt, a reply with the same ID, or EOF.
-# An absent ID pairs only with another absent ID. It does not close a session.
+# An absent ID pairs only with another absent ID. It never counts as a session.
 for (( ROW = 0; ROW < TOTAL_LINES; ROW++ )); do
   IFS=$'\t' read -r ROLE SID CONTENT || break
   case "$ROLE" in
@@ -770,9 +770,8 @@ for (( ROW = 0; ROW < TOTAL_LINES; ROW++ )); do
     *) continue ;;
   esac
   if ! queue_session_id_valid "$SID"; then SID="."; fi
-  if [ "$SID" != "." ] && [ "$SID" != "$LAST_SID" ] && [ "$INTERLEAVED" = "false" ]; then
-    case " $CLOSED_SIDS " in *" $SID "*) INTERLEAVED="true" ;; esac
-    if [ -n "$LAST_SID" ]; then CLOSED_SIDS="$CLOSED_SIDS $LAST_SID"; fi
+  if [ "$SID" != "." ]; then
+    if [ -z "$FIRST_SID" ]; then FIRST_SID="$SID"; elif [ "$SID" != "$FIRST_SID" ]; then MIXED_SESSIONS="true"; fi
     LAST_SID="$SID"
   fi
 
@@ -876,10 +875,19 @@ if [ -n "$MEMORY_PRESENT" ]; then
   fi
 fi
 
-# Carry the mark from the same note snapshot as the checksum and prompt.
-if [ "$INTERLEAVED" = "true" ]; then
+# Read the stamp from the same note snapshot as the checksum and prompt.
+# The stamp keeps the ID of the last session that wrote the note. A batch of two
+# IDs, or of an ID that differs from the stamp ID, marks the note. The mark ends
+# 4 hours after the last such batch, since the stamp keeps no older IDs.
+memory_stamp_parse "${EXISTING_MEMORY%%$'\n'*}"
+NOTE_SID="$STAMP_SESSION"
+if [ -n "$NOTE_SID" ] && [ -n "$FIRST_SID" ] && [ "$NOTE_SID" != "$FIRST_SID" ]; then
+  MIXED_SESSIONS="true"
+fi
+if [ -n "$LAST_SID" ]; then NOTE_SID="$LAST_SID"; fi
+if [ "$MIXED_SESSIONS" = "true" ]; then
   MULTI_EPOCH=$(date +%s) || MULTI_EPOCH=""
-  log "Queue rows interleave across sessions"
+  log "The note holds turns of more than one session"
 else
   MULTI_EPOCH=$(memory_multi_epoch_from_line "${EXISTING_MEMORY%%$'\n'*}" "$(date +%s)")
 fi
@@ -1452,7 +1460,7 @@ verify_and_swap() {
     refuse_note "staged file exists but stamp missing on line 1"
     return
   fi
-  _stamp=$(memory_stamp_line "$HEAD_SHA" "$BRANCH" "$MULTI_EPOCH")
+  _stamp=$(memory_stamp_line "$HEAD_SHA" "$BRANCH" "$MULTI_EPOCH" "$NOTE_SID")
 
   # The EXIT trap removes the swap copy before it releases the worker lock.
   SWAP_CLEANUP="true"
