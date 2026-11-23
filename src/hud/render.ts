@@ -15,6 +15,7 @@ import contextUsage from './components/context-usage.js';
 import versionBadge from './components/version-badge.js';
 import sessionDuration from './components/session-duration.js';
 import usageQuota from './components/usage-quota.js';
+import weekForecast from './components/week-forecast.js';
 import codexQuota from './components/codex-quota.js';
 import todoProgress from './components/todo-progress.js';
 import configCounts from './components/config-counts.js';
@@ -33,6 +34,7 @@ const COMPONENT_MAP: Record<ComponentId, ComponentFn> = {
   versionBadge,
   sessionDuration,
   usageQuota,
+  weekForecast,
   codexQuota,
   todoProgress,
   configCounts,
@@ -48,7 +50,7 @@ const COMPONENT_MAP: Record<ComponentId, ComponentFn> = {
  */
 const LINE_GROUPS: ComponentId[][] = [
   ['directory', 'gitBranch', 'gitAheadBehind', 'releaseInfo', 'worktreeCount', 'diffStats'],
-  ['contextUsage', 'usageQuota', 'codexQuota', 'todoProgress'],
+  ['contextUsage', 'usageQuota', 'weekForecast', 'codexQuota', 'todoProgress'],
   ['model', 'configCounts', 'sessionCost'],
   ['curationCounts'],
   ['versionBadge'],

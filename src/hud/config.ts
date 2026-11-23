@@ -40,9 +40,10 @@ export function loadConfig(): HudConfig {
     return {
       enabled: parsed.enabled !== false,
       detail: parsed.detail === true,
+      forecast: parsed.forecast === true,
     };
   } catch {
-    return { enabled: true, detail: false };
+    return { enabled: true, detail: false, forecast: false };
   }
 }
 
@@ -56,7 +57,9 @@ export function saveConfig(config: HudConfig): void {
 }
 
 export function resolveComponents(config: HudConfig): ComponentId[] {
-  if (config.enabled) return [...HUD_COMPONENTS];
+  if (config.enabled) {
+    return config.forecast === true ? [...HUD_COMPONENTS, 'weekForecast'] : [...HUD_COMPONENTS];
+  }
   // Version badge always renders so users see upgrade notifications
   return ['versionBadge'];
 }

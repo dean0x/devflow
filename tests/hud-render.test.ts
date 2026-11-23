@@ -47,6 +47,7 @@ function makeCtx(
     config: {
       enabled: true,
       detail: false,
+      forecast: false,
       components: [...HUD_COMPONENTS],
       ...configOverride,
     },
@@ -172,7 +173,7 @@ describe('render', () => {
 
   it('handles subset of components', async () => {
     const ctx = makeCtx({
-      config: { enabled: true, detail: false, components: ['directory', 'model'] },
+      config: { enabled: true, detail: false, forecast: false, components: ['directory', 'model'] },
     });
     const output = await render(ctx);
     const raw = stripAnsi(output);
@@ -235,12 +236,12 @@ describe('config', () => {
   });
 
   it('resolveComponents returns all components when enabled', () => {
-    const config: HudConfig = { enabled: true, detail: false };
+    const config: HudConfig = { enabled: true, detail: false, forecast: false };
     expect(resolveComponents(config)).toEqual([...HUD_COMPONENTS]);
   });
 
   it('resolveComponents returns only versionBadge when disabled', () => {
-    const config: HudConfig = { enabled: false, detail: false };
+    const config: HudConfig = { enabled: false, detail: false, forecast: false };
     expect(resolveComponents(config)).toEqual(['versionBadge']);
   });
 
