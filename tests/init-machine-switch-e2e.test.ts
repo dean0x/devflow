@@ -529,6 +529,24 @@ describe('init --hud-only over a full install (D-HUD-ONLY-PRESERVE)', () => {
   }, MULTI_RUN_TIMEOUT_MS);
 });
 
+describe('init preserves the HUD forecast choice', () => {
+  it.each([
+    ['--recommended', true],
+    ['--recommended', false],
+    ['--hud-only', true],
+    ['--hud-only', false],
+  ] as const)('%s keeps forecast: %s', async (mode, forecast) => {
+    runInit(repoA, '--recommended', '--hud');
+    const configPath = path.join(devflowDir(), 'hud.json');
+    await fs.writeFile(configPath, JSON.stringify({ enabled: false, detail: true, forecast }));
+
+    runInit(repoA, mode);
+
+    const config: unknown = JSON.parse(await fs.readFile(configPath, 'utf-8'));
+    expect(config).toEqual({ enabled: true, detail: true, forecast });
+  }, MULTI_RUN_TIMEOUT_MS);
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // TP-8/TP-9 — on→off re-init transitions converge every artifact
 // ─────────────────────────────────────────────────────────────────────────────
