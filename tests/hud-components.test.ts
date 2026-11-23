@@ -498,6 +498,8 @@ describe('weekForecast component', () => {
     [80, 82, '→ 156% by reset, runs out in 21h 30m'],
     [70, 84, '→ 140% by reset, runs out in 1d 12h'],
     [50, 84, '→ 100% by reset, runs out in 3d 12h'],
+    // The estimate reaches 100% less than half a millisecond after reset.
+    [49.99999998, 84, '→ 100% by reset'],
     [99, 162, '→ >999% by reset, runs out in 3m'],
     [100, 84, '→ 200% by reset'],
     [0, 84, '→ 0% by reset'],

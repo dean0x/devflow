@@ -33,14 +33,13 @@ export function parseWeekPoint(sevenDay: unknown, nowMs: number): WeekPoint | nu
  * D-TOKENMETER-HUD covers only the Codex client. Like usageQuota, this part uses stdin.
  */
 export function weekForecastFrom({ usedPercent, resetsAtMs }: WeekPoint, nowMs: number) {
-  const remainingMs = resetsAtMs - nowMs;
-  const elapsedMs = WEEK_MS - remainingMs;
+  const elapsedMs = nowMs - (resetsAtMs - WEEK_MS);
   if (!(elapsedMs >= BURN_FREE_FRACTION * WEEK_MS)) return null;
 
   const burn = usedPercent / (elapsedMs / HOUR_MS);
-  const atResetPct = usedPercent + burn * (remainingMs / HOUR_MS);
-  const runsOutAtMs = burn > 0 ? Math.round(nowMs + ((100 - usedPercent) / burn) * HOUR_MS) : Infinity;
-  return { atResetPct, runsOutAtMs: runsOutAtMs <= resetsAtMs ? runsOutAtMs : null };
+  const atResetPct = usedPercent + burn * ((resetsAtMs - nowMs) / HOUR_MS);
+  const runsOut = burn > 0 ? nowMs + ((100 - usedPercent) / burn) * HOUR_MS : Infinity;
+  return { atResetPct, runsOutAtMs: runsOut <= resetsAtMs ? Math.round(runsOut) : null };
 }
 
 export function forecastPercentText(pct: number): string {
