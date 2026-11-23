@@ -1014,10 +1014,10 @@ describe('the init copy for working memory', () => {
     expect(workingMemoryNote()).toContain('8 KB (8,192 bytes). Use one worktree for each parallel session.');
   });
 
-  it('states the same note cap as the shell helper (TP-50)', async ({ skip }) => {
+  it('states the same note cap as the shell helper (TP-50)', async () => {
     const hook = await fs.readFile(path.resolve(__dirname, '../src/assets/scripts/hooks/memory-permission'), 'utf-8');
     const cap = hook.match(/^MEMORY_NOTE_CAP_BYTES=(\d+)$/m)?.[1];
-    if (cap === undefined) return skip(); // S4 adds the shell constant and tests that it is present.
+    expect(cap).toBe('8192');
     expect(workingMemoryNote()).toContain(`(${Number(cap).toLocaleString('en-US')} bytes)`);
   });
 });

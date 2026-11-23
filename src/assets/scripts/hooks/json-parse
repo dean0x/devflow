@@ -105,6 +105,27 @@ json_extract_cwd_field() {
   fi
 }
 
+# Extract cwd, a typed session ID, and a top-level value, separated by two SOH
+# bytes. An invalid ID gives an empty field. Split only at the first two markers.
+json_extract_cwd_sid_field() {
+  local field="$1"
+  if [ "$_HAS_JQ" = "true" ]; then
+    jq -j --arg f "$field" '
+      def sid:
+        if type != "string" then ""
+        elif length < 1 or length > 64 then ""
+        elif all(explode[]; . == 45 or . == 95 or (. >= 48 and . <= 57)
+          or (. >= 65 and . <= 90) or (. >= 97 and . <= 122)) then .
+        else "" end;
+      (.cwd // "") as $cwd
+      | if ($cwd | all(explode[]; . != 0 and . != 1)) then
+          $cwd + "\u0001" + (.session_id | sid) + "\u0001" + (.[$f] // "")
+        else error("invalid cwd") end' 2>/dev/null
+  else
+    node "$_JSON_HELPER" extract-cwd-sid-field "$field" 2>/dev/null
+  fi
+}
+
 # Thin wrapper over json_extract_cwd_field -- kept as a named function since
 # it is the most common call site (capture-prompt, preamble).
 json_extract_cwd_prompt() {

@@ -13,16 +13,16 @@
 #   memory_settings_json    the settings JSON that carries the rules
 #   memory_staged_remove    the guarded removal of a folder or a link at the staged path
 #   memory_result_summary   the fixed log line for a captured JSON result
+#   memory_note_within_cap  the byte count of a regular note file
+#   memory_stamp_*          the first line of a note
 #   memory_notice_*         the one-time notice: the worker writes it, a session start reads it
-#   memory_denied_seen      the count of denied runs that raises the `denied` notice
+#   memory_refusal_seen     the count of note refusals or denied runs
 #
-# The worker writes a notice, or counts a denied run, only while the memory area is known
-# to be free of files that git tracks: DF_TRACKED_AREA_MEMORY (queue_tracked_area, queue-append)
-# must read `untracked` in the calling process. Any other value, an unset one included,
-# is a paused area, and both helpers then write nothing.
+# The worker writes or clears a notice, or counts a refusal, only when
+# DF_TRACKED_AREA_MEMORY (queue_tracked_area, queue-append) reads `untracked`.
 #
-# Source it after resolve-project-root (it needs df_no_symlink_below and df_file_below)
-# and, for memory_result_summary, after json-parse. log() is used when the caller has one.
+# Notice helpers need resolve-project-root. The result summary needs json-parse.
+# Stamp helpers need is-hex-sha. The notice reader uses log() if present.
 #
 # Errexit safety: both hooks run under `set -e`, and a helper's last non-zero status
 # aborts the caller. So each helper ends in an explicit `return 0` or a `return` with the
@@ -32,10 +32,12 @@
 # Character sets are spelled out in the patterns below: a range such as a-z collates by
 # locale on bash 3.2.
 
-# The reasons a notice can carry, and the file each one uses beside the memory files:
-#   path    the project path cannot carry the rule, or the staged path is unusable
-#   denied  Claude Code refused the worker's write in two runs with no successful update between them
-MEMORY_NOTICE_REASONS="path denied"
+MEMORY_NOTE_CAP_BYTES=8192
+MEMORY_NOTE_TARGET_CHARS=6000
+MEMORY_MULTI_SESSION_SECS=14400
+
+# A notice can name the project path, denied writes, or note format.
+MEMORY_NOTICE_REASONS="path denied note"
 
 # path_occupied <path> — returns 0 when a file, a folder or a link stands on <path>, and 1
 # when nothing does. A link counts whatever it names, a dangling link included: the name is
@@ -197,6 +199,79 @@ _memory_field_within() {
   return 0
 }
 
+# memory_note_within_cap <file> — sets MEMORY_NOTE_BYTES to a count or `unknown`.
+# A valid count above the cap is kept for the caller, but returns 1.
+memory_note_within_cap() {
+  local _file="${1:-}" _bytes _MEMORY_FIELD
+  MEMORY_NOTE_BYTES="unknown"
+  [ -f "$_file" ] && [ ! -L "$_file" ] || return 1
+  _bytes=$(wc -c 2>/dev/null < "$_file") || return 1
+  _bytes=${_bytes#"${_bytes%%[![:blank:]]*}"}
+  _bytes=${_bytes%"${_bytes##*[![:blank:]]}"}
+  _memory_field_within digits "$_bytes" 7
+  [ "$_MEMORY_FIELD" != "unknown" ] || return 1
+  MEMORY_NOTE_BYTES="$_bytes"
+  [ "$_bytes" -le "$MEMORY_NOTE_CAP_BYTES" ] || return 1
+  return 0
+}
+
+_memory_stamp_branch_valid() {
+  case "${1:-}" in ''|*[[:space:][:cntrl:]]*) return 1 ;; esac
+  [ "${#1}" -le 200 ] || return 1
+  return 0
+}
+
+# memory_stamp_line <sha> <branch> [<epoch>] — prints one note stamp.
+memory_stamp_line() {
+  local _sha="${1:-}" _branch="${2:-}" _multi="" _MEMORY_FIELD
+  is_hex_sha "$_sha" || _sha="unknown"
+  _memory_stamp_branch_valid "$_branch" || _branch="unknown"
+  _memory_field_within digits "${3:-}" 10
+  if [ "$_MEMORY_FIELD" != "unknown" ]; then _multi=" multi: $_MEMORY_FIELD"; fi
+  printf '<!-- memory-head: %s branch: %s%s -->\n' "$_sha" "$_branch" "$_multi"
+  return 0
+}
+
+# memory_stamp_parse <line> — sets STAMP_SHA, STAMP_BRANCH and STAMP_MULTI.
+# Each field that does not fit the format is empty. No subprocesses.
+memory_stamp_parse() {
+  local _line="${1:-}" _sha _branch _MEMORY_FIELD
+  STAMP_SHA=""; STAMP_BRANCH=""; STAMP_MULTI=""
+  case "$_line" in
+    "<!-- memory-head: "*" branch: "*" -->") ;;
+    *) return 0 ;;
+  esac
+  _line=${_line#"<!-- memory-head: "}
+  _line=${_line%" -->"}
+  _sha=${_line%%" branch: "*}
+  _branch=${_line#*" branch: "}
+  case "$_branch" in
+    *" multi: "*)
+      _memory_field_within digits "${_branch#*" multi: "}" 10
+      if [ "$_MEMORY_FIELD" != "unknown" ]; then STAMP_MULTI="$_MEMORY_FIELD"; fi
+      _branch=${_branch%%" multi: "*}
+      ;;
+  esac
+  if is_hex_sha "$_sha"; then STAMP_SHA="$_sha"; fi
+  if _memory_stamp_branch_valid "$_branch"; then STAMP_BRANCH="$_branch"; fi
+  return 0
+}
+
+# memory_multi_epoch_from_line <line> <now> — prints a current mark or nothing.
+# The timestamp and clock are decimal, even with leading zeroes.
+memory_multi_epoch_from_line() {
+  local _now="${2:-}" _age _MEMORY_FIELD
+  memory_stamp_parse "${1:-}"
+  [ -n "$STAMP_MULTI" ] || return 0
+  _memory_field_within digits "$_now" 10
+  [ "$_MEMORY_FIELD" != "unknown" ] || return 0
+  _age=$((10#$_now - 10#$STAMP_MULTI))
+  if [ "$_age" -ge 0 ] && [ "$_age" -lt "$MEMORY_MULTI_SESSION_SECS" ]; then
+    printf '%s' "$STAMP_MULTI"
+  fi
+  return 0
+}
+
 # memory_result_summary <file> — reduces a `--output-format json` result file to a fixed
 # line, and reads nothing else of it: the tool input and the result text, which can hold
 # the memory body, are never read. Sets, in the caller's scope:
@@ -250,8 +325,8 @@ memory_result_summary() {
 # written unless DF_TRACKED_AREA_MEMORY reads `untracked` in this process.
 memory_notice_write() {
   local _dir="${1:-}" _root="${2:-}" _reason="${3:-}" _file
-  case " $MEMORY_NOTICE_REASONS " in
-    *" $_reason "*) ;;
+  case "$_reason" in
+    path|denied|note) ;;
     *) return 0 ;;
   esac
   [ "${DF_TRACKED_AREA_MEMORY:-}" = "untracked" ] || return 0
@@ -265,43 +340,57 @@ memory_notice_write() {
 }
 
 # memory_notice_clear <memory dir> <root> <reason> — removes the notice, its `.shown`
-# marker and, for `denied`, the one-denied-run marker, once the cause is gone. The
-# files are removed only where no link sits on the way down from <root>.
+# marker and, for `denied` or `note`, its `-once` marker. It leaves linked paths alone.
 memory_notice_clear() {
   local _dir="${1:-}" _root="${2:-}" _reason="${3:-}" _file _mark
-  case " $MEMORY_NOTICE_REASONS " in
-    *" $_reason "*) ;;
+  case "$_reason" in
+    path|denied|note) ;;
     *) return 0 ;;
   esac
+  [ "${DF_TRACKED_AREA_MEMORY:-}" = "untracked" ] || return 0
   _file="$_dir/.worker-notice-$_reason"
-  _mark="$_dir/.worker-denied-once"
+  _mark="$_dir/.worker-$_reason-once"
   if path_occupied "$_file" || path_occupied "$_file.shown"; then
     if df_no_symlink_below "$_root" "$_file" "$_file.shown"; then
       rm -f "$_file" "$_file.shown" 2>/dev/null || true
     fi
   fi
-  if [ "$_reason" = "denied" ] && path_occupied "$_mark"; then
-    if df_no_symlink_below "$_root" "$_mark"; then
-      rm -f "$_mark" 2>/dev/null || true
+  case "$_reason" in
+    denied|note)
+      if path_occupied "$_mark" && df_no_symlink_below "$_root" "$_mark"; then
+        rm -f "$_mark" 2>/dev/null || true
+      fi
+      ;;
+  esac
+  return 0
+}
+
+# memory_refusal_seen <memory dir> <root> <denied|note> — sets MEMORY_REFUSAL_COUNT
+# to `first` after a create, `second` when the marker is present, or `none`.
+# The caller clears the marker. For `note`, only a regular marker counts.
+memory_refusal_seen() {
+  local _dir="${1:-}" _root="${2:-}" _reason="${3:-}" _mark
+  MEMORY_REFUSAL_COUNT="none"
+  case "$_reason" in denied|note) ;; *) return 0 ;; esac
+  [ "${DF_TRACKED_AREA_MEMORY:-}" = "untracked" ] || return 0
+  [ -d "$_dir" ] || return 0
+  _mark="$_dir/.worker-$_reason-once"
+  if path_occupied "$_mark"; then
+    if [ "$_reason" = "denied" ] || { [ -f "$_mark" ] && df_no_symlink_below "$_root" "$_mark"; }; then
+      MEMORY_REFUSAL_COUNT="second"
     fi
+  elif df_no_symlink_below "$_root" "$_mark" \
+       && ( umask 077; set -C; : > "$_mark" ) 2>/dev/null; then
+    MEMORY_REFUSAL_COUNT="first"
   fi
   return 0
 }
 
-# memory_denied_seen <memory dir> <root> — records one run that Claude Code refused the
-# worker's write in. The first leaves a marker; a second, with the marker still there,
-# raises the `denied` notice. A run that swapped the memory in clears both
-# (memory_notice_clear denied), so only two denied runs with no successful update between
-# them count. No marker is left unless DF_TRACKED_AREA_MEMORY reads `untracked` in this process.
+# The second denied run raises the notice. A successful update clears its count.
 memory_denied_seen() {
-  local _dir="${1:-}" _root="${2:-}" _mark
-  [ "${DF_TRACKED_AREA_MEMORY:-}" = "untracked" ] || return 0
-  [ -d "$_dir" ] || return 0
-  _mark="$_dir/.worker-denied-once"
-  if path_occupied "$_mark"; then
-    memory_notice_write "$_dir" "$_root" "denied"
-  elif df_no_symlink_below "$_root" "$_mark"; then
-    ( umask 077; set -C; : > "$_mark" ) 2>/dev/null || true
+  memory_refusal_seen "${1:-}" "${2:-}" denied
+  if [ "$MEMORY_REFUSAL_COUNT" = "second" ]; then
+    memory_notice_write "${1:-}" "${2:-}" denied
   fi
   return 0
 }
@@ -318,6 +407,9 @@ memory_notice_text() {
       ;;
     denied)
       MEMORY_NOTICE_TEXT="Devflow: working memory is not updating because Claude Code refused the worker's write in two runs with no successful update between them. ${_where}"
+      ;;
+    note)
+      MEMORY_NOTICE_TEXT="Devflow: two updates did not meet the note format or size limit. The worker kept the previous note. ${_where}"
       ;;
   esac
   return 0
