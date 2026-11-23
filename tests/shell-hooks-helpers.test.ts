@@ -867,7 +867,7 @@ describe('memory-permission: the one-time notice', () => {
     run('memory_notice_write "$MEM" "$ROOT" path');
 
     const first = read('/home/u/.devflow/logs/p/.background-memory-update.log');
-    expect(first).toContain('project path');
+    expect(first).toContain('a project path blocks the working memory update');
     expect(first).toContain('/home/u/.devflow/logs/p/.background-memory-update.log');
     expect(first, 'it names the folder the log sits in').toContain('under ~/.devflow/logs/, in the folder for the session that ran it');
     expect(fs.existsSync(pending('path')), 'moved').toBe(false);
@@ -1055,14 +1055,14 @@ describe('memory-permission: the one-time notice', () => {
     expect(run(noteRefusal)).toBe('first');
   });
 
-  it('reports no note refusal when the memory area is paused or the marker is not a regular file', () => {
+  it('reports no count when the area is paused and a blocked count for a folder at the marker', () => {
     const marker = path.join(memory, '.worker-note-once');
     const noteRefusal = 'memory_refusal_seen "$MEM" "$ROOT" note; printf "%s" "$MEMORY_REFUSAL_COUNT"';
 
     expect(run(noteRefusal, 'tracked')).toBe('none');
     expect(fs.readdirSync(memory)).toEqual([]);
     fs.mkdirSync(marker);
-    expect(run(noteRefusal)).toBe('none');
+    expect(run(noteRefusal)).toBe('blocked');
     expect(fs.statSync(marker).isDirectory()).toBe(true);
   });
 
@@ -1083,6 +1083,15 @@ describe('memory-permission: the one-time notice', () => {
     it('leaves no notice and no denied-run marker, however often the worker asks', () => {
       run('memory_notice_write "$MEM" "$ROOT" path\nmemory_notice_write "$MEM" "$ROOT" denied\nmemory_denied_seen "$MEM" "$ROOT"\nmemory_denied_seen "$MEM" "$ROOT"', area);
       expect(fs.readdirSync(memory)).toEqual([]);
+    });
+
+    it('keeps the notice and its two markers', () => {
+      const files = [pending('note'), shown('note'), path.join(memory, '.worker-note-once')];
+      for (const file of files) fs.writeFileSync(file, 'x');
+
+      run('memory_notice_clear "$MEM" "$ROOT" note\nmemory_notice_clear "$MEM" "$ROOT" denied', area);
+
+      expect(fs.readdirSync(memory).sort()).toEqual(files.map((file) => path.basename(file)).sort());
     });
   });
 });

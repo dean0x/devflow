@@ -319,20 +319,30 @@ exec /bin/rm "$@"
 
   it('treats invalid IDs as absent without changing the count of unreadable rows', () => {
     const invalid = ['bad\n', 'bad\t', 'bad\x01', '../bad', 'a'.repeat(65), 123, { id: 'bad' }, '.', 'bad\x00'];
+    const literals = ['*', '[a]', '$(touch x)'];
     const { turns, log } = runQueue([
       row('user', 'New prompt', A),
       ...invalid.map((id, index) => row('assistant', `Unassigned reply ${index}`, id)),
       'malformed{',
       '{"role":"assistant","content":7}',
       row('assistant', 'New reply', A),
+      ...literals.flatMap((id, index) => [
+        row('user', `Legacy prompt ${index}`),
+        row('assistant', `Legacy reply ${index}`, id),
+      ]),
     ]);
 
     expect(turns).toEqual([
       ...invalid.map((_, index) => `Assistant: Unassigned reply ${index}`),
       'User: New prompt\nAssistant: New reply',
+      ...literals.map((_, index) => `User: Legacy prompt ${index}\nAssistant: Legacy reply ${index}`),
     ]);
     expect(log).toContain('Skipped 2 queue line(s) that hold no readable turn');
     expect(log).not.toContain(INTERLEAVE_LOG);
+    expect({ project: fs.readdirSync(project).sort(), memory: fs.readdirSync(memoryDir).sort() }).toEqual({
+      project: ['.devflow', '.git'],
+      memory: ['.last-refresh-ok', 'WORKING-MEMORY.md'],
+    });
   }, budget);
 
   it('uses marked data boundaries and asks for a small note with only two sections', () => {
@@ -467,6 +477,26 @@ exec /bin/rm "$@"
     writeClaudeStub();
     runWorker(ONE_SESSION);
     expect(fs.existsSync(path.join(memoryDir, NOTICE))).toBe(false);
+  }, budget);
+
+  it.each(['folder', 'link'])('drops the batch and leaves a path notice when a %s occupies the refusal marker', (kind) => {
+    const marker = path.join(memoryDir, ONCE);
+    if (kind === 'folder') fs.mkdirSync(marker);
+    else fs.symlinkSync(note, marker);
+    fs.writeFileSync(note, OLD_NOTE);
+    writeClaudeStub('No stamp\n');
+
+    runWorker(ONE_SESSION);
+
+    const files = fs.readdirSync(memoryDir, { withFileTypes: true });
+    const keptMarker = files.find((file) => file.name === ONCE);
+    const pathNotice = files.find((file) => file.name === '.worker-notice-path');
+    expect({
+      markerKept: kind === 'folder' ? keptMarker?.isDirectory() : keptMarker?.isSymbolicLink(),
+      batchKept: files.some((file) => file.name === BATCH),
+      noteNotice: files.some((file) => file.name === NOTICE),
+      pathNotice: pathNotice?.isFile() ? fs.readFileSync(path.join(memoryDir, pathNotice.name), 'utf8') : '',
+    }).toEqual({ markerKept: true, batchKept: false, noteNotice: false, pathNotice: 'path\n' });
   }, budget);
 
   it.each([

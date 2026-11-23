@@ -1409,24 +1409,30 @@ elif [ "$CLAUDE_EXIT" -ne 0 ]; then
   exit 0
 fi
 
-# D1: a batch gets one retry when the model output does not fit the note format.
+# D1: a refused batch gets one retry if the worker can record the first refusal.
 refuse_note() {
   NOTE_REFUSED="true"
   OUTCOME="failed"
-  if [ -z "$RESULT_DENIED" ] \
-      && memory_refusal_seen "$MEMORY_DIR" "$PROJECT_ROOT" note \
-      && [ "$MEMORY_REFUSAL_COUNT" = "second" ] \
-      && df_no_symlink_below "$PROJECT_ROOT" "$PROCESSING_FILE" \
-      && rm -f "$PROCESSING_FILE" 2>/dev/null; then
-    log "Batch discarded after two note refusals"
-    memory_notice_write "$MEMORY_DIR" "$PROJECT_ROOT" note
-    if df_no_symlink_below "$PROJECT_ROOT" "$MEMORY_DIR/.worker-note-once"; then
-      rm -f "$MEMORY_DIR/.worker-note-once" 2>/dev/null || true
+  if [ -z "$RESULT_DENIED" ]; then
+    memory_refusal_seen "$MEMORY_DIR" "$PROJECT_ROOT" note
+    if { [ "$MEMORY_REFUSAL_COUNT" = "second" ] || [ "$MEMORY_REFUSAL_COUNT" = "blocked" ]; } \
+        && df_no_symlink_below "$PROJECT_ROOT" "$PROCESSING_FILE" \
+        && rm -f "$PROCESSING_FILE" 2>/dev/null; then
+      if [ "$MEMORY_REFUSAL_COUNT" = "blocked" ]; then
+        log "Batch discarded: .worker-note-once is not a regular marker"
+        memory_notice_write "$MEMORY_DIR" "$PROJECT_ROOT" path
+      else
+        log "Batch discarded after two note refusals"
+        memory_notice_write "$MEMORY_DIR" "$PROJECT_ROOT" note
+        if df_no_symlink_below "$PROJECT_ROOT" "$MEMORY_DIR/.worker-note-once"; then
+          rm -f "$MEMORY_DIR/.worker-note-once" 2>/dev/null || true
+        fi
+      fi
+      log "WARN: $1; verification failed"
+      return 0
     fi
-    log "WARN: $1; verification failed"
-  else
-    log "WARN: $1; verification failed — leaving .processing for recovery"
   fi
+  log "WARN: $1; verification failed — leaving .processing for recovery"
 }
 
 # D-MEMORY-STAGED-CAS: only the worker can replace the note. Keep the note and

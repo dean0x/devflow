@@ -367,7 +367,8 @@ memory_notice_clear() {
 
 # memory_refusal_seen <memory dir> <root> <denied|note> — sets MEMORY_REFUSAL_COUNT
 # to `first` after a create, `second` when the marker is present, or `none`.
-# The caller clears the marker. For `note`, only a regular marker counts.
+# For `note`, an occupied path without a regular marker reads `blocked`.
+# The caller clears a marker that counts.
 memory_refusal_seen() {
   local _dir="${1:-}" _root="${2:-}" _reason="${3:-}" _mark
   MEMORY_REFUSAL_COUNT="none"
@@ -378,6 +379,8 @@ memory_refusal_seen() {
   if path_occupied "$_mark"; then
     if [ "$_reason" = "denied" ] || { [ -f "$_mark" ] && df_no_symlink_below "$_root" "$_mark"; }; then
       MEMORY_REFUSAL_COUNT="second"
+    else
+      MEMORY_REFUSAL_COUNT="blocked"
     fi
   elif df_no_symlink_below "$_root" "$_mark" \
        && ( umask 077; set -C; : > "$_mark" ) 2>/dev/null; then
@@ -403,7 +406,7 @@ memory_notice_text() {
   MEMORY_NOTICE_TEXT=""
   case "$_reason" in
     path)
-      MEMORY_NOTICE_TEXT="Devflow: working memory is not updating because the worker cannot write its staged file at this project path. ${_where}"
+      MEMORY_NOTICE_TEXT="Devflow: a project path blocks the working memory update. ${_where}"
       ;;
     denied)
       MEMORY_NOTICE_TEXT="Devflow: working memory is not updating because Claude Code refused the worker's write in two runs with no successful update between them. ${_where}"
