@@ -659,9 +659,9 @@ function buildCorpus(): Array<{ relPath: string; content: string }> {
  * CHANGELOG.md as the corpus holds it, or undefined only when the file is absent.
  *
  * A present file is ALWAYS a corpus entry, even when it carries no current claims.
- * scripts/bump-version.ts renames `## [Unreleased]` to the release header, and the
- * release workflow runs this suite on that tree: the file is still scanned there,
- * it just has nothing unreleased in it. Dropping it would report every
+ * scripts/bump-version.ts renames `## [Unreleased]` to the release header above a new
+ * empty [Unreleased], and the release workflow runs this suite on that tree: the file is
+ * still scanned there, it just has nothing unreleased in it. Dropping it would report every
  * CHANGELOG.md-scoped entry as retired from a tree nothing scans — a failure on
  * every release — when the scope is live and the next [Unreleased] is guarded.
  */
@@ -887,10 +887,11 @@ describe('retired-wording guard — denylist of retired literals (GAP-32)', () =
 // ---------------------------------------------------------------------------
 // The changelog across a release bump
 //
-// scripts/bump-version.ts renames `## [Unreleased]` to `## [X.Y.Z] - date` and
-// the release workflow runs the suite on that tree, so the guard sees a changelog
-// with no [Unreleased] section on every release. CHANGELOG.md is still scanned
-// then — it simply has no current claims — and its scoped entries must stay live.
+// scripts/bump-version.ts renames `## [Unreleased]` to `## [X.Y.Z] - date` above a new
+// empty [Unreleased], and the release workflow runs the suite on that tree, so the guard
+// sees a changelog with an empty [Unreleased] section, or with none in an older
+// tree. CHANGELOG.md is still scanned then — it simply has no current claims — and
+// its scoped entries must stay live.
 // ---------------------------------------------------------------------------
 
 describe('retired-wording guard — CHANGELOG.md across the release bump', () => {
