@@ -88,6 +88,10 @@ Context ████░░░░ 42% · 5h ████░░░░ 45% (2h 15m)
 Opus 4.6 (1M) · 3 MCPs 2 rules · $1.42 · $18.50/wk · $62.30/mo
 ```
 
+**Claude week forecast, opt-in.** The forecast is off by default. Run `devflow hud --forecast` to show the estimated quota use at reset next to `7d`. Run `devflow hud --no-forecast` to turn it off. Run `devflow hud --status` to see your choice. Devflow saves your choice in the `forecast` field of `~/.devflow/hud.json`. `devflow init` keeps that choice. When the HUD and the forecast are on, the HUD adds the `weekForecast` component.
+
+The HUD uses the same formula as the tokenmeter forecast, but it needs no tokenmeter data. It uses the current session's `rate_limits.seven_day` from Claude Code on stdin. The HUD treats that value as current at each update. It omits the forecast if the week data is absent or invalid. It also omits the forecast for about the first five hours of the quota week.
+
 For Codex limits, the HUD runs `tokenmeter hud` when its cache expires, usually after 30 seconds. tokenmeter checks recent Codex session logs in the background. By default, tokenmeter can start `codex app-server` at most about once per minute per data folder. Codex can then use its stored sign-in to request the limits and the account token usage from OpenAI over HTTP.
 
 To stop the app server and the account usage request, and keep the log source, run `npx @dean0x/tokenmeter@0.3.0 config app_server off`.

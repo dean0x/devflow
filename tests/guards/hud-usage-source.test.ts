@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, extname, join, relative } from 'node:path';
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 import { ROOT, walkFiles, type CorpusEntry } from '../helpers.js';
 
@@ -53,7 +54,7 @@ const privatePath = (...parts: string[]): string => ['', ...parts].join('/');
 // Pre-existing dummy paths in older tests. Do not exempt a whole file or folder prefix.
 const DUMMY_PATHS: Readonly<Record<string, readonly string[]>> = {
   'tests/hud-components.test.ts': [privatePath('home', 'user', 'projects', 'my-app')],
-  'tests/hud-render.test.ts': [privatePath('home', 'user', 'project'), privatePath('tmp', 'nonexistent-devflow-test-home'), privatePath('tmp', 'hud-config-home')],
+  'tests/hud-render.test.ts': [privatePath('home', 'user', 'project')],
   'tests/uninstall-logic.test.ts': [
     privatePath('tmp', 'devflow-d8-disjoint'), privatePath('Users', 'testuser'),
     privatePath('Users', 'testuser', '.devflow', 'skills'), privatePath('tmp', '.devflow'),
@@ -122,6 +123,16 @@ describe('HUD Codex usage source', () => {
     const hud = hudSources();
     expect(hud.length).toBeGreaterThan(0);
     expectClean([...hud, entry('src/core/cache.ts'), entry(BIN_OWNER), entry(BIN_READER)], matches(RETIRED_READER));
+  });
+
+  it('uses only local stdin data for the week forecast, with no HUD entry gather', () => {
+    const forecast = read('src/hud/components/week-forecast.ts');
+    const imports = ts.preProcessFile(forecast, true, true).importedFiles.map(({ fileName }) => fileName);
+    expect(imports.sort()).toEqual(['../colors.js', '../types.js', './usage-quota.js']);
+
+    const hudEntry = read('src/hud/index.ts');
+    expect(hudEntry).toContain('resolveComponents(config)');
+    expect(hudEntry).not.toMatch(/forecast/i);
   });
 
   it('names no relay package in the current docs or the new HUD sources', () => {

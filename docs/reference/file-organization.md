@@ -43,8 +43,8 @@ devflow/
 │   ├── hud/                          # HUD module (TypeScript source)
 │   │   ├── index.ts                  # Entry point: stdin → gather → render → stdout
 │   │   ├── render.ts                 # Smart multi-line layout assembly
-│   │   ├── config.ts                 # PRESETS, loadConfig, saveConfig
-│   │   └── components/               # 15 individual component renderers
+│   │   ├── config.ts                 # HUD_COMPONENTS, loadConfig, saveConfig
+│   │   └── components/               # 17 component renderers
 │   ├── targets/claude-code/          # Claude Code install target
 │   │   ├── installer.ts              # installViaFileCopy, composeScripts, installScripts
 │   │   ├── claude-paths.ts           # getInstallationPaths
@@ -371,9 +371,15 @@ An entry's content changes only by re-projection from its log row (D-LOG-CONTENT
 
 ## HUD (Heads-Up Display)
 
-The HUD (`dist/hud/index.js`) is a configurable TypeScript status line. The fixed component list is defined in `HUD_COMPONENTS` in `src/hud/config.ts` and includes: directory, git branch, git ahead/behind, diff stats, release info, worktree count, model, context usage, version badge, session cost, usage quota, Codex quota, todo progress, config counts, and curation counts.
+The HUD (`dist/hud/index.js`) is a configurable TypeScript status line. `HUD_COMPONENTS` in `src/hud/config.ts` lists these 15 default components:
 
-Configuration: `~/.devflow/hud.json` (`{ enabled, detail }`). Manage via `devflow hud --status | --enable | --disable | --detail | --no-detail`.
+- Directory, Git branch, Git ahead/behind, diff stats, release info, and worktree count.
+- Model, context usage, version badge, and session cost.
+- Usage quota, Codex quota, todo progress, config counts, and curation counts.
+
+The HUD stores `{ enabled, detail, forecast }` in `~/.devflow/hud.json`. Use `devflow hud` with `--status`, `--enable`, `--disable`, `--detail`, `--no-detail`, `--forecast`, or `--no-forecast`.
+
+The `weekForecast` component is off by default. The HUD adds it only when the HUD is on and `forecast` is `true`. The component uses `rate_limits.seven_day` from stdin. The `sessionDuration` component is not in the default list.
 
 The HUD reads `context_window.current_usage` and `rate_limits` from Claude Code's JSON stdin. For Codex quota, it runs `tokenmeter hud` from the path in `~/.devflow/tokenmeter.json` when the HUD cache expires. `devflow init` saves this path. The HUD omits the Codex segment if it cannot use the saved path or get a reading. See [HUD (Status Line)](../cli-reference.md#hud-status-line) for the refresh rules and the app-server switch.
 

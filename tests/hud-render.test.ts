@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -10,7 +10,7 @@ import {
   resolveComponents,
 } from '../src/hud/config.js';
 import { stripAnsi } from '../src/hud/colors.js';
-import type { GatherContext, HudConfig, ComponentId } from '../src/hud/types.js';
+import type { GatherContext, HudConfig, ComponentId, StdinData } from '../src/hud/types.js';
 
 function makeCtx(
   overrides: Partial<GatherContext> & { config?: Partial<HudConfig> & { components?: ComponentId[] } } = {},
@@ -47,6 +47,7 @@ function makeCtx(
     config: {
       enabled: true,
       detail: false,
+      forecast: false,
       components: [...HUD_COMPONENTS],
       ...configOverride,
     },
@@ -172,7 +173,7 @@ describe('render', () => {
 
   it('handles subset of components', async () => {
     const ctx = makeCtx({
-      config: { enabled: true, detail: false, components: ['directory', 'model'] },
+      config: { enabled: true, detail: false, forecast: false, components: ['directory', 'model'] },
     });
     const output = await render(ctx);
     const raw = stripAnsi(output);
@@ -204,43 +205,140 @@ describe('render', () => {
   });
 });
 
+describe('week forecast on the capacity line', () => {
+  const nowMs = Date.parse('2026-11-23T12:00:00Z');
+  const resetIn = (hours: number) => nowMs / 1000 + hours * 3600;
+  const week = (percent: unknown, reset: unknown = resetIn(84)) => ({
+    rate_limits: { seven_day: { used_percentage: percent, resets_at: reset } },
+  });
+
+  beforeEach(() => {
+    vi.spyOn(Date, 'now').mockReturnValue(nowMs);
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  function renderWeek(forecast: boolean, stdin: unknown, percent = 40, reset = resetIn(84)) {
+    const config: HudConfig = { enabled: true, detail: false, forecast };
+    return render(makeCtx({
+      stdin: stdin as StdinData,
+      // The version badge can query npm. It is not part of the capacity line.
+      config: { ...config, components: resolveComponents(config).filter((id) => id !== 'versionBadge') },
+      usage: { fiveHourPercent: 30, sevenDayPercent: percent, fiveHourResetsAt: null, sevenDayResetsAt: reset },
+      codexUsage: {
+        windows: [{ minutes: 10080, usedPercent: 12, resetsAt: resetIn(24) }],
+        limitReached: null,
+        observedAt: nowMs,
+      },
+    }));
+  }
+
+  it('keeps the pre-forecast capacity line byte for byte when off', async () => {
+    const line = (await renderWeek(false, week(40))).split('\n')[1];
+
+    expect(line).toBe(
+      '\x1b[2m5h \x1b[0m\x1b[32m██\x1b[0m\x1b[2m░░░░░░\x1b[0m \x1b[32m30%\x1b[0m' +
+      '\x1b[2m · \x1b[0m\x1b[2m7d \x1b[0m\x1b[32m███\x1b[0m\x1b[2m░░░░░\x1b[0m \x1b[32m40%\x1b[0m\x1b[2m (3d 12h)\x1b[0m' +
+      '\x1b[2m · \x1b[0m\x1b[2mCodex \x1b[0m\x1b[2m7d \x1b[0m\x1b[32m█\x1b[0m\x1b[2m░░░░░░░\x1b[0m \x1b[32m12%\x1b[0m\x1b[2m (1d)\x1b[0m',
+    );
+  });
+
+  it.each([
+    [40, 84, '→ 80% by reset'],
+    [70, 84, '→ 140% by reset, runs out in 1d 12h'],
+    [99, 162, '→ >999% by reset, runs out in 3m'],
+    [100, 84, '→ 200% by reset'],
+    [0, 84, '→ 0% by reset'],
+  ] as const)('adds a dim forecast after 7d and keeps each quota at %s%% used', async (percent, hours, text) => {
+    const reset = resetIn(hours);
+    const line = (await renderWeek(true, week(percent, reset), percent, reset)).split('\n')[1] ?? '';
+
+    expect(stripAnsi(line).split(' · ')).toEqual([
+      expect.stringMatching(/^5h .{8} 30%$/),
+      expect.stringMatching(new RegExp(`^7d .{8} ${percent}% \\(`)),
+      text,
+      expect.stringMatching(/^Codex 7d .{8} 12% \(1d\)$/),
+    ]);
+    expect(line).toContain(`\x1b[2m${text}\x1b[0m`);
+  });
+
+  it.each([
+    ['no rate_limits', {}],
+    ['no seven_day', { rate_limits: {} }],
+    ['a null seven_day', { rate_limits: { seven_day: null } }],
+    ['a string seven_day', { rate_limits: { seven_day: '40' } }],
+    ['an array seven_day', { rate_limits: { seven_day: [] } }],
+    ['a string percent', week('40')],
+    ['NaN percent', week(NaN)],
+    ['negative percent', week(-1)],
+    ['percent above 100', week(101)],
+    ['no reset', { rate_limits: { seven_day: { used_percentage: 40 } } }],
+    ['a string reset', week(40, String(resetIn(84)))],
+    ['a reset at now', week(40, resetIn(0))],
+    ['a past reset', week(40, resetIn(-1))],
+    ['a reset more than 8 days away', week(40, resetIn(8 * 24) + 1)],
+    ['a reset in milliseconds', week(40, resetIn(84) * 1000)],
+    ['only 5 hours elapsed', week(40, resetIn(163))],
+  ] as const)('keeps the output byte-identical to off with %s', async (_label, stdin) => {
+    // The forecast must not fall back to the gathered quota when raw stdin is invalid.
+    const off = await renderWeek(false, stdin);
+
+    expect(off).toContain('Codex');
+    expect(await renderWeek(true, stdin)).toBe(off);
+  });
+});
+
 describe('config', () => {
-  it('loadConfig returns default when no file exists', () => {
-    // Point HOME at a directory with no .devflow (the HUD reads $HOME/.devflow only).
-    const originalHome = process.env.HOME;
-    process.env.HOME = '/tmp/nonexistent-devflow-test-home';
-    try {
-      const config = loadConfig();
-      expect(config.enabled).toBe(true);
-      expect(config.detail).toBe(false);
-    } finally {
-      process.env.HOME = originalHome;
-    }
+  let tmpHome: string;
+
+  beforeEach(() => {
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'devflow-hud-config-'));
+    vi.stubEnv('HOME', tmpHome);
+    fs.mkdirSync(path.join(tmpHome, '.devflow'));
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it('loadConfig returns defaults when no file exists', () => {
+    expect(loadConfig()).toEqual({ enabled: true, detail: false, forecast: false });
+  });
+
+  it.each([
+    ['{"forecast":true}', true],
+    ['{"forecast":false}', false],
+    ['{}', false],
+    ['{"forecast":"true"}', false],
+    ['{"forecast":1}', false],
+    ['{"forecast":true', false],
+  ] as const)('loads the forecast opt-in from %s as %s', (json, forecast) => {
+    fs.writeFileSync(getConfigPath(), json);
+
+    expect(loadConfig().forecast).toBe(forecast);
   });
 
   it('getConfigPath resolves under $HOME/.devflow and ignores an exported DEVFLOW_DIR (D-ONE-HOME, AC-10)', () => {
-    const originalHome = process.env.HOME;
-    const canary = fs.mkdtempSync(path.join(os.tmpdir(), 'hud-config-canary-'));
-    process.env.HOME = '/tmp/hud-config-home';
-    process.env.DEVFLOW_DIR = canary;
-    try {
-      expect(getConfigPath()).toBe(path.join('/tmp/hud-config-home', '.devflow', 'hud.json'));
-      loadConfig();
-      expect(fs.readdirSync(canary)).toEqual([]);
-    } finally {
-      process.env.HOME = originalHome;
-      delete process.env.DEVFLOW_DIR;
-      fs.rmSync(canary, { recursive: true, force: true });
-    }
+    const canary = fs.mkdtempSync(path.join(tmpHome, 'hud-config-canary-'));
+    vi.stubEnv('DEVFLOW_DIR', canary);
+
+    expect(getConfigPath()).toBe(path.join(tmpHome, '.devflow', 'hud.json'));
+    loadConfig();
+    expect(fs.readdirSync(canary)).toEqual([]);
   });
 
-  it('resolveComponents returns all components when enabled', () => {
-    const config: HudConfig = { enabled: true, detail: false };
-    expect(resolveComponents(config)).toEqual([...HUD_COMPONENTS]);
+  it('resolveComponents returns the default components when forecast is off', () => {
+    const config: HudConfig = { enabled: true, detail: false, forecast: false };
+    expect(resolveComponents(config)).toEqual(HUD_COMPONENTS);
   });
 
-  it('resolveComponents returns only versionBadge when disabled', () => {
-    const config: HudConfig = { enabled: false, detail: false };
+  it('resolveComponents adds weekForecast when HUD and forecast are on', () => {
+    const config: HudConfig = { enabled: true, detail: false, forecast: true };
+    expect(resolveComponents(config)).toEqual([...HUD_COMPONENTS, 'weekForecast']);
+  });
+
+  it('resolveComponents returns only versionBadge when HUD is off even with forecast on', () => {
+    const config: HudConfig = { enabled: false, detail: false, forecast: true };
     expect(resolveComponents(config)).toEqual(['versionBadge']);
   });
 

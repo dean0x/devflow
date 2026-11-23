@@ -125,6 +125,24 @@ describe('the HUD run from the installed scripts directory', { timeout: 30_000 }
     expect(line).not.toContain('Codex');
   });
 
+  it('renders the week forecast from stdin with no tokenmeter state or data', () => {
+    const forecastHome = fs.mkdtempSync(path.join(tmp, 'forecast-home-'));
+    const emptyPath = fs.mkdtempSync(path.join(tmp, 'forecast-path-'));
+    const devflowDir = path.join(forecastHome, '.devflow');
+    fs.mkdirSync(devflowDir, { mode: 0o700 });
+    fs.writeFileSync(path.join(devflowDir, 'hud.json'), JSON.stringify({ enabled: true, detail: false, forecast: true }));
+    const resetsAt = Math.floor(Date.now() / 1000) + 84 * 3600;
+
+    const line = runInstalledHud(tmp, {
+      home: forecastHome,
+      lookupPath: emptyPath,
+      stdin: { rate_limits: { seven_day: { used_percentage: 40, resets_at: resetsAt } } },
+    });
+
+    expect(line).toContain('→ 80% by reset');
+    expect(line).not.toContain('Codex');
+  });
+
   it('renders within its own two-second budget and saves a cache miss before exit', () => {
     const cacheHome = path.join(tmp, 'cache-home');
     const marker = path.join(cacheHome, 'render-ms');
