@@ -1344,14 +1344,8 @@ exit 0
 // =============================================================================
 // S16 — Queue-claim lost-race: mv fails → SKIP path, queue preserved
 //
-// Tests worker line: mv "$QUEUE_FILE" "$PROCESSING_FILE" 2>/dev/null ||
-//   { log "SKIP: failed to claim queue (race condition — another worker got it)"; exit 0; }
-//
-// The mv failure is simulated by pre-creating the PROCESSING_FILE destination as a
-// read-only directory, causing mv to fail (cannot rename into a non-writable dir).
-// This is the most faithful simulation of a concurrent-worker race: the second worker
-// finds the queue file present but cannot claim it.
-// Behavioral coverage: test observable outcomes, not implementation strings.
+// A folder at the batch path blocks the claim before mv. With a clear path, a
+// failed mv has its own log message. Both cases must leave the queue in place.
 // =============================================================================
 describe('S16: queue-claim lost-race — mv failure takes SKIP path, queue preserved', () => {
   let projectDir: string;
@@ -1368,43 +1362,37 @@ describe('S16: queue-claim lost-race — mv failure takes SKIP path, queue prese
   });
 
   afterEach(() => {
-    // Restore permissions so rmSync can recurse
-    const memDir = path.join(projectDir, '.devflow', 'memory');
-    try { execSync(`chmod -R 755 "${memDir}"`, { stdio: 'ignore' }); } catch { /* ignore */ }
     fs.rmSync(projectDir, { recursive: true, force: true });
     fs.rmSync(homeDir, { recursive: true, force: true });
     fs.rmSync(shimDir, { recursive: true, force: true });
   });
 
-  it('mv failure → SKIP logged, worker exits 0, queue file preserved, no memory write', () => {
-    const memFile       = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
-    const queueFile     = path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl');
-    const processingDir = path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing');
+  it.each([
+    ['a folder blocks the batch path', 'SKIP: a queue or recovery path is not a regular file'],
+    ['the claim move fails', 'SKIP: failed to claim queue (race condition'],
+  ] as const)('keeps the queue when %s', (scenario, message) => {
+    const memoryDir = path.join(projectDir, '.devflow', 'memory');
+    const memFile = path.join(memoryDir, 'WORKING-MEMORY.md');
+    const queueFile = path.join(memoryDir, '.pending-turns.jsonl');
 
     createFakeClaudeShim(shimDir, memFile);
     seedQueue(projectDir);
-
-    // Pre-create .pending-turns.processing as a read-only directory.
-    // mv .pending-turns.jsonl .pending-turns.processing will attempt to rename INTO
-    // this directory; with mode 555 that rename fails (EACCES on macOS).
-    fs.mkdirSync(processingDir);
-    fs.chmodSync(processingDir, 0o555);
+    if (scenario === 'a folder blocks the batch path') {
+      fs.mkdirSync(path.join(memoryDir, '.pending-turns.processing'));
+    } else {
+      writeFakeExecutable(path.join(shimDir, 'mv'), `#!/bin/bash
+case "$1" in */.pending-turns.jsonl) exit 1 ;; esac
+exec /bin/mv "$@"
+`);
+    }
+    const queueBytes = fs.readFileSync(queueFile);
 
     const { exitCode } = runWorker(projectDir, homeDir, shimDir);
 
-    // Worker must exit 0 (SKIP is a clean exit, not a crash)
     expect(exitCode).toBe(0);
-
-    // WORKING-MEMORY.md must NOT be written (worker bailed before claude invocation)
     expect(fs.existsSync(memFile)).toBe(false);
-
-    // Queue file must still exist — mv failed so the queue was not consumed
-    expect(fs.existsSync(queueFile)).toBe(true);
-
-    // Log must contain the SKIP message for this exact path
-    const logFile = workerLogPath(projectDir, homeDir);
-    const logContent = fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8') : '';
-    expect(logContent).toContain('SKIP: failed to claim queue (race condition');
+    expect(fs.readFileSync(queueFile)).toEqual(queueBytes);
+    expect(fs.readFileSync(workerLogPath(projectDir, homeDir), 'utf-8')).toContain(message);
   });
 });
 

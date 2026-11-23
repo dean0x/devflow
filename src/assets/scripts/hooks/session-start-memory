@@ -103,6 +103,12 @@ if [ "${DF_TRACKED_AREA_MEMORY:-unknown}" != "untracked" ]; then
   exit 0
 fi
 
+# Refuse a linked parent once, before recovery or any memory read.
+if ! df_no_symlink_below "$PROJECT_ROOT" "$MEMORY_DIR"; then
+  log "Skipped: a symbolic link sits on the path to the memory folder"
+  exit 0
+fi
+
 # --- D56c cold-path recovery: orphaned .pending-turns.processing ---
 # The worker owns recovery. SessionStart moves a stale batch to an empty queue
 # under the same queue lock. A batch beside a claimed queue or merge copy still
@@ -115,18 +121,25 @@ _SSM_PT_JSONL="$MEMORY_DIR/.pending-turns.jsonl"
 _SSM_PT_CLAIMED="$_SSM_PT_PROC.claimed"
 _SSM_PT_MERGE="$_SSM_PT_PROC.merge"
 _SSM_PT_LOCK="$_SSM_PT_JSONL.lock"
+_SSM_REFUSED_PATH=""
 
 recover_stale_memory_batch() {
-  local _batch="$_SSM_PT_PROC" _mtime _age
+  local _batch="$_SSM_PT_PROC" _mtime _age _path
   if ! path_occupied "$_SSM_PT_PROC"; then _batch="$_SSM_PT_MERGE"; fi
-  df_file_below "$PROJECT_ROOT" "$_batch" || return 0
+  if ! df_file_below "$PROJECT_ROOT" "$_batch"; then
+    _SSM_REFUSED_PATH="$_batch"
+    return 0
+  fi
   _mtime=$(get_mtime "$_batch" 2>/dev/null) || return 0
   _age=$(( $(date +%s) - ${_mtime:-0} ))
   [ "$_age" -gt 300 ] || return 0
-  if ! df_no_symlink_below "$PROJECT_ROOT" "$_SSM_PT_JSONL" "$_SSM_PT_CLAIMED" "$_SSM_PT_MERGE"; then
-    log "Stale .pending-turns.processing skipped (cold path): a symbolic link sits on a recovery path"
-    return 0
-  fi
+  for _path in "$_SSM_PT_JSONL" "$_SSM_PT_CLAIMED" "$_SSM_PT_MERGE"; do
+    if ! df_no_symlink_below "$PROJECT_ROOT" "$_path"; then
+      log "Stale .pending-turns.processing skipped (cold path): a symbolic link sits on the path to $_path"
+      _SSM_REFUSED_PATH="$_path"
+      return 0
+    fi
+  done
   if path_occupied "$_SSM_PT_JSONL"; then
     log "Stale .pending-turns.processing skipped (cold path): .pending-turns.jsonl already exists"
     return 0
@@ -194,12 +207,13 @@ detect_refresh_failing() {
   local _proc_file="$_memory_dir/.pending-turns.processing"
   local _ok_file="$_memory_dir/.last-refresh-ok"
   local _queue_depth=0
-  if df_file_below "$_root" "$_queue_file" && [ -s "$_queue_file" ]; then
+  # Recovery already refused this path. Do not check it or log its refusal again.
+  if [ "$_queue_file" != "$_SSM_REFUSED_PATH" ] && df_file_below "$_root" "$_queue_file" && [ -s "$_queue_file" ]; then
     _queue_depth=$(wc -l < "$_queue_file" | tr -d ' ')
   fi
   # Also count lines in .processing — an orphaned batch left by a crashed worker
   # is unprocessed content even if .jsonl is empty (applies B4 blind-spot fix)
-  if df_file_below "$_root" "$_proc_file" && [ -s "$_proc_file" ]; then
+  if [ "$_proc_file" != "$_SSM_REFUSED_PATH" ] && df_file_below "$_root" "$_proc_file" && [ -s "$_proc_file" ]; then
     local _proc_depth
     _proc_depth=$(wc -l < "$_proc_file" | tr -d ' ')
     _queue_depth=$(( _queue_depth + _proc_depth ))

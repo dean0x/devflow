@@ -603,6 +603,11 @@ if [ -f "$PROCESSING_FILE" ] || [ -f "$CLAIMED_FILE" ] || [ -f "$MERGE_FILE" ]; 
       [ -f "$CLAIMED_FILE" ] || [ -f "$MERGE_FILE" ] || continue
     else
       [ -f "$QUEUE_FILE" ] || break
+      # A merge copy must not bypass a read-only batch. Process that batch alone.
+      if [ -f "$PROCESSING_FILE" ] && [ ! -w "$PROCESSING_FILE" ]; then
+        MERGE_LOG="Could not append the queue to the recovery batch — the queue is kept for the next run"
+        break
+      fi
     fi
     if ! merge_recovery_batch 2>/dev/null; then
       log "SKIP: recovery merge incomplete; rows kept for the next run"

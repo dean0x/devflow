@@ -133,9 +133,10 @@ describe('the memory hooks and a memory folder that git tracks', { timeout: TEST
 
       expect(context).toContain(CANARY);
       expect(context).toContain('MEMORY REFRESH MAY BE FAILING');
-      expect(message).toContain('working memory is not updating');
+      expect(message).toContain('a project path blocks the working memory update');
       expect(fs.existsSync(path.join(main, MEMORY, '.pending-turns.jsonl')), 'the cold path moved the stale batch').toBe(true);
       expect(fs.existsSync(path.join(main, MEMORY, '.worker-notice-path.shown'))).toBe(true);
+      expect(start('startup').message, 'no new path notice after recovery').toBe('');
     });
 
     describe.each(['startup', 'resume', 'clear'])('a session that %s, git tracks a file of the memory folder', (source) => {
@@ -150,7 +151,7 @@ describe('the memory hooks and a memory folder that git tracks', { timeout: TEST
         expect(context).toBe('');
         expect(raw).not.toContain(CANARY);
         expect(raw).not.toContain('MEMORY REFRESH');
-        expect(raw).not.toContain('working memory is not updating');
+        expect(raw).not.toContain('a project path blocks the working memory update');
         expect(snapshotTree(path.join(main, MEMORY), { stat: true }), 'bytes, modes and mtimes are as they were').toEqual(before);
         expect(fs.existsSync(path.join(main, MEMORY, '.worker-notice-path')), 'the worker notice stays where it was').toBe(true);
         expect(fs.existsSync(path.join(main, MEMORY, '.pending-turns.processing')), 'no batch was renamed').toBe(true);
