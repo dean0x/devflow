@@ -67,7 +67,7 @@ Learned by `/release` on 2026-08-23 from: `package.json`, `.github/workflows/rel
 **CI-driven (primary)**:
 1. Release PR: `npm run version:bump -- {VERSION}` on a branch, PR `chore(release): v{VERSION}`,
    merge after CI passes
-2. Tag the merged commit: `git fetch origin main && git tag -a v{VERSION} -m "Version {VERSION}" origin/main && git push origin v{VERSION}`
+2. Tag the merge commit of the release PR (not a later commit on main): `git fetch origin main && git tag -a v{VERSION} -m "Version {VERSION}" <merge SHA> && git push origin v{VERSION}`
 3. The tag push starts `release.yml`: verify (tag format, tag on main, tag = package.json =
    package-lock.json, CHANGELOG section, build, test, integration test, `cli --version`) →
    publish (npm trusted publishing, `npx -y npm@11.x publish --provenance`, tag `latest` or the

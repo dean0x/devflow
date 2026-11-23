@@ -99,9 +99,17 @@ describe('release workflow: no stored token', () => {
     it(`${name} names no token and reads no secret`, () => {
       const text = readWorkflow(name);
       for (const token of TOKEN_NAMES) expect(text, `${name} names ${token}`).not.toContain(token);
-      expect(text, `${name} reads a secret`).not.toContain('secrets.');
+      expect(text, `${name} reads a secret`).not.toMatch(/\bsecrets\b/);
     });
   }
+
+  it('uses the workflow token in one place only: the GitHub release step', () => {
+    for (const name of WORKFLOW_FILES.filter(file => file !== 'release.yml')) {
+      expect(readWorkflow(name), name).not.toContain('github.token');
+    }
+    expect(RELEASE.match(/github\.token/g) ?? []).toHaveLength(1);
+    expect(jobsOf(RELEASE).get('github-release')).toMatch(/^ {10}GH_TOKEN: \$\{\{ github\.token \}\}\s*$/m);
+  });
 
   it('the repo root has no .npmrc', () => {
     expect(existsSync(path.join(ROOT, '.npmrc'))).toBe(false);
@@ -114,11 +122,21 @@ describe('release workflow: no stored token', () => {
 
   it('restores no npm cache', () => {
     expect(RELEASE).not.toMatch(/^\s*cache:/m);
+    expect(RELEASE).not.toContain('actions/cache');
+    // setup-node turns on its cache when package.json names a package manager.
+    const setups = RELEASE.match(/uses: actions\/setup-node@/g) ?? [];
+    const noCache = RELEASE.match(/^ {10}package-manager-cache: false\s*$/gm) ?? [];
+    expect(setups.length).toBeGreaterThan(0);
+    expect(noCache.length).toBe(setups.length);
   });
 
   it('runs no dependency install scripts', () => {
-    expect(RELEASE).toMatch(/^\s*run: npm ci --ignore-scripts\s*$/m);
-    expect(RELEASE).not.toMatch(/^\s*run: npm (ci|install)(?! --ignore-scripts\s*$).*$/m);
+    const installs = runScriptsOf(RELEASE)
+      .flatMap(script => script.split('\n'))
+      .map(line => line.trim())
+      .filter(line => /^npm (ci|install|i|rebuild|add)\b/.test(line));
+    expect(installs.length).toBeGreaterThan(0);
+    for (const line of installs) expect(line).toBe('npm ci --ignore-scripts');
   });
 
   it('keeps no checkout credentials in any job', () => {
@@ -133,7 +151,8 @@ describe('release workflow: trigger and jobs', () => {
   const jobs = jobsOf(RELEASE);
 
   it('starts only from a v* tag push', () => {
-    expect(RELEASE).toMatch(/^on:\n {2}push:\n {4}tags:\n {6}- "v\*"\n/m);
+    // The whole on: block: one push trigger with one tag pattern.
+    expect(RELEASE).toMatch(/^on:\n {2}push:\n {4}tags:\n {6}- "v\*"\n\n(?! )/m);
     expect(RELEASE).not.toContain('workflow_dispatch');
     expect(RELEASE).not.toMatch(/^\s*branches:/m);
   });
@@ -157,10 +176,13 @@ describe('release workflow: trigger and jobs', () => {
   it('the verify job checks the tag, the lock file, the build, the tests and the CLI version', () => {
     const verify = jobs.get('verify') ?? '';
     for (const needle of [
+      "grep -qE '^v[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z]+(\\.[0-9A-Za-z]+)*)?$'",
       'git merge-base --is-ancestor "${GITHUB_SHA}" origin/main',
       'TAG_VERSION="${GITHUB_REF_NAME#v}"',
       "require('./package-lock.json').packages[''].version",
       'grep -qF "## [${VERSION}] - " CHANGELOG.md',
+      // The release notes extract before the publish, with no file change.
+      'npx tsx scripts/bump-version.ts "${GITHUB_REF_NAME#v}" > "${RUNNER_TEMP}/release-notes.md"\n          git diff --exit-code',
       'run: npm run build',
       'run: npm test',
       'run: npm run test:integration',
@@ -179,6 +201,30 @@ describe('release workflow: trigger and jobs', () => {
     expect(match, 'no pinned npx npm publish step').not.toBeNull();
     const version = (match ?? []).slice(1, 4).map(Number);
     expect(atLeast(version, MIN_TRUSTED_NPM), `npm ${version.join('.')} is too old`).toBe(true);
+  });
+
+  it('selects the npm dist-tag from the version', () => {
+    const script = runScriptsOf(jobs.get('publish') ?? '').find(text => text.includes('tag=latest'));
+    expect(script, 'no dist-tag step').toBeDefined();
+    const dir = mkdtempSync(path.join(tmpdir(), 'dist-tag-'));
+    try {
+      const distTag = (ref: string): string => {
+        const output = path.join(dir, `${ref}.out`);
+        writeFileSync(output, '');
+        execFileSync('bash', ['-e', '-c', script ?? ''], {
+          env: { PATH: process.env.PATH ?? '', GITHUB_REF_NAME: ref, GITHUB_OUTPUT: output },
+          stdio: 'ignore',
+        });
+        return readFileSync(output, 'utf8');
+      };
+      expect(distTag('v3.20.0')).toBe('tag=latest\n');
+      expect(distTag('v2.0.0-beta.1')).toBe('tag=beta\n');
+      expect(distTag('v2.0.0-rc.1')).toBe('tag=rc\n');
+      expect(distTag('v2.0.0-1')).toBe('tag=next\n');
+      expect(distTag('v4.0.0-latest.1')).toBe('tag=next\n');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('the version check orders npm versions', () => {

@@ -11,7 +11,7 @@ A release PR sets the version and the CHANGELOG. After it merges, a `vX.Y.Z` tag
    - Workflow filename: `release.yml`
    - Environment: empty (the jobs use no GitHub environment)
 
-2. **npm publishing access** — after the first trusted publish, set the package publishing access to "Require two-factor authentication and disallow tokens". Revoke each old npm token that can publish `devflow-kit`.
+2. **npm publishing access** — after the first trusted publish, set the package publishing access to "Require two-factor authentication and disallow tokens". Revoke each old npm token that can publish `devflow-kit`. Delete the old repository Actions secrets of the dispatch release (`NPM_TOKEN`, `RELEASE_TOKEN`), and revoke the personal access token behind `RELEASE_TOKEN`.
 
 The npm publish signs in with the workflow identity (OIDC). It needs npm 11.5.1 or newer, so the publish step runs a pinned npm 11 through `npx`. `tests/release-workflow.test.ts` keeps every workflow free of stored tokens and secrets, and keeps each action pinned to a full commit SHA.
 
@@ -47,11 +47,11 @@ An install moves a file that devflow did not ship out of the devflow install fol
    - adds a new empty `## [Unreleased]` section above the new version;
    - prints the release notes.
 2. Open a release PR with the title `chore(release): v1.3.0`, and merge it after CI passes.
-3. Tag the merged commit on main, and push the tag:
+3. Tag the merge commit of the release PR (not a later commit on main), and push the tag:
 
    ```bash
    git fetch origin main
-   git tag -a v1.3.0 -m "Version 1.3.0" origin/main
+   git tag -a v1.3.0 -m "Version 1.3.0" <merge commit SHA of the release PR>
    git push origin v1.3.0
    ```
 
@@ -67,7 +67,7 @@ verify (contents: read)
   → tagged commit is on main
   → tag version equals package.json
   → package-lock.json version equals package.json
-  → CHANGELOG.md has the ## [X.Y.Z] - <date> section
+  → CHANGELOG.md has the ## [X.Y.Z] - <date> section, and the release notes extract with no file change
   → build, npm test, npm run test:integration
   → node dist/cli.js --version equals the tag version
 publish (contents: read, id-token: write), after verify

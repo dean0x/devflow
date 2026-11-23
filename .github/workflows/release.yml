@@ -34,6 +34,8 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
+          # No npm cache, also when package.json names a package manager.
+          package-manager-cache: false
 
       - name: Install dependencies
         run: npm ci --ignore-scripts
@@ -79,6 +81,13 @@ jobs:
             exit 1
           fi
 
+      # The github-release job runs this same extraction after the publish.
+      # It fails here first, for example on a non-empty [Unreleased] section.
+      - name: Verify the release notes extract with no file change
+        run: |
+          npx tsx scripts/bump-version.ts "${GITHUB_REF_NAME#v}" > "${RUNNER_TEMP}/release-notes.md"
+          git diff --exit-code
+
       - name: Build
         run: npm run build
 
@@ -116,6 +125,8 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
+          # No npm cache, also when package.json names a package manager.
+          package-manager-cache: false
 
       # This job can sign in to npm, so no dependency runs an install script here.
       - name: Install dependencies
@@ -141,7 +152,8 @@ jobs:
               PRE="${VERSION#*-}"
               PRE="${PRE%%.*}"
               # npm refuses a dist-tag that is a version range, such as `1`.
-              if ! printf '%s\n' "${PRE}" | grep -qE '^[A-Za-z][0-9A-Za-z]*$'; then
+              # A pre-release never moves `latest`.
+              if ! printf '%s\n' "${PRE}" | grep -qE '^[A-Za-z][0-9A-Za-z]*$' || [ "${PRE}" = latest ]; then
                 PRE=next
               fi
               echo "tag=${PRE}" >> "${GITHUB_OUTPUT}"
@@ -178,6 +190,8 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
+          # No npm cache, also when package.json names a package manager.
+          package-manager-cache: false
 
       - name: Install dependencies
         run: npm ci --ignore-scripts
