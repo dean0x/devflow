@@ -39,13 +39,12 @@
 #   the pre-existing memory design -- see the design doc's "Append-vs-claim race"
 #   note).
 #
-# queue_append_both <memory_root> <memory_queue> <curation_root> <curation_queue> <memory_enabled> <curation_enabled> <role> <content> <ts>
-#   Builds the row once, then appends it as queue_append_row does to each queue whose
-#   *_enabled flag is "true", with the root that queue lies below. Each queue is gated
-#   independently -- callers compute memory_enabled/curation_enabled themselves (see
-#   queue_read_gates below for the at-most-one-fork read of both). With neither queue
-#   enabled it builds nothing. A queue whose area is paused (see queue_tracked_area) reads
-#   as not enabled for the call, and nothing is built for it.
+# queue_append_both <memory_root> <memory_queue> <curation_root> <curation_queue> <memory_enabled> <curation_enabled> <role> <content> <ts> [<session_id>]
+#   Builds the required rows in one process, then appends as queue_append_row does.
+#   Only the memory row can carry a valid session_id. The curation row does not change.
+#   Callers compute memory_enabled and curation_enabled with queue_read_gates.
+#   Each queue has its own gate and root. A paused area counts as disabled.
+#   With neither queue enabled, it builds nothing.
 #
 # queue_tracked_area <root> <curation|memory|both> [git|node]
 #   Does git track files in the data folders of the area at <root>? Sets
@@ -144,23 +143,48 @@
 # back, so the umask the process holds when it first appends is the one it keeps.
 _QAR_UMASK=""
 
-# _qar_build_row <role> <content> <ts> -- sets _QAR_ROW to the JSONL row, built by jq
-# (--arg, --argjson) or node (JSON.stringify), never by string concatenation. A
-# predicate: it succeeds only for a row that built, and a row that fails to build is
-# empty, so nothing partial can reach a queue. Call it in an `if` or an `||` list.
+# queue_session_id_valid <id> -- check the ID with builtins only.
+queue_session_id_valid() {
+  local _sid="${1:-}"
+  case "$_sid" in ''|*[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-]*) return 1 ;; esac
+  [ "${#_sid}" -le 64 ]
+}
+
+# _qar_build_row <role> <content> <ts> [<sid> [<both>]] -- set _QAR_ROW to the
+# sole row or the curation row. When both is true, set _QAR_MEMORY_ROW too.
+# Use one jq or node call. Refuse incomplete output before either queue can use it.
 _qar_build_row() {
+  local _sid="${4:-}" _both="${5:-false}" _out=""
   _QAR_ROW=""
+  # Keep the final newline until the row count check can see extra empty lines.
   if [ "$_HAS_JQ" = "true" ]; then
-    _QAR_ROW=$(jq -n -c --arg role "$1" --arg content "$2" --argjson ts "$3" \
-      '{role: $role, content: $content, ts: $ts}') || _QAR_ROW=""
+    _out=$(jq -n -c --arg role "$1" --arg content "$2" --argjson ts "$3" \
+      --arg sid "$_sid" --argjson both "$_both" '
+      {role: $role, content: $content, ts: $ts} |
+      if $sid == "" then .
+      elif $both then ., (. + {session_id: $sid})
+      else . + {session_id: $sid} end' && printf x) || _out=""
   else
-    _QAR_ROW=$(node -e "process.stdout.write(JSON.stringify({role:process.argv[1],content:process.argv[2],ts:parseInt(process.argv[3])}))" \
-      -- "$1" "$2" "$3") || _QAR_ROW=""
+    _out=$(node -e '
+      const [role, content, ts, sid, both] = process.argv.slice(1);
+      const row = {role, content, ts: parseInt(ts)};
+      if (both === "true") console.log(JSON.stringify(row));
+      console.log(JSON.stringify(sid === "" ? row : {...row, session_id: sid}));
+    ' -- "$1" "$2" "$3" "$_sid" "$_both" && printf x) || _out=""
   fi
-  if [ -z "$_QAR_ROW" ]; then
-    log "Queue skipped: the row could not be built; nothing written"
-    return 1
+  _out=${_out%x}
+  _out=${_out%$'\n'}
+  if [ "$_both" = "true" ]; then
+    case "$_out" in
+      $'\n'*|*$'\n'|*$'\n'*$'\n'*) _out="" ;;
+      *$'\n'*) _QAR_MEMORY_ROW=${_out#*$'\n'}; _out=${_out%%$'\n'*} ;;
+      *) _out="" ;;
+    esac
   fi
+  case "$_out" in
+    ''|*$'\n'*) log "Queue skipped: the row could not be built; nothing written"; return 1 ;;
+  esac
+  _QAR_ROW="$_out"
   return 0
 }
 
@@ -237,17 +261,23 @@ _qar_append() {
   return 0
 }
 
+# _qar_count_lines <queue_file> -- set _QAR_LINES, or fail if the count is unavailable.
+_qar_count_lines() {
+  _QAR_LINES=$(wc -l 2>/dev/null < "$1") || return 1
+  _QAR_LINES=${_QAR_LINES#"${_QAR_LINES%%[![:blank:]]*}"}
+  case "$_QAR_LINES" in ''|*[!0123456789]*) return 1 ;; esac
+  return 0
+}
+
 # _qar_trim_overflow <queue_file> -- overflow safety: past 200 lines, keep the newest
 # 100, locked to prevent a multi-session race.
 _qar_trim_overflow() {
-  local _qar_file="$1" _qar_lines="" _qar_lock="" _qar_tmp=""
+  local _qar_file="$1" _QAR_LINES="" _qar_lock="" _qar_tmp=""
   [ -f "$_qar_file" ] || return 0
-  _qar_lines=$(wc -l < "$_qar_file" | tr -d ' ')
-  if [ "$_qar_lines" -gt 200 ]; then
+  if _qar_count_lines "$_qar_file" && [ "$_QAR_LINES" -gt 200 ]; then
     _qar_lock="${_qar_file}.lock"
     if curation_lock_acquire "$_qar_lock" 2; then
-      _qar_lines=$(wc -l < "$_qar_file" | tr -d ' ')
-      if [ "$_qar_lines" -gt 200 ]; then
+      if _qar_count_lines "$_qar_file" && [ "$_QAR_LINES" -gt 200 ]; then
         _qar_tmp="${_qar_file}.tmp.$$"
         # SEC-2: the trimmed copy is created under umask 077, so the renamed
         # queue keeps mode 0600. mv replaces the inode, so the queue takes the
@@ -257,9 +287,9 @@ _qar_trim_overflow() {
         # never opened (noclobber alone would open one, as no regular file stands
         # there), and noclobber then makes the create itself exclusive. Such an
         # entry is removed instead, and the trim waits for a later append.
-        if [ ! -e "$_qar_tmp" ] && [ ! -L "$_qar_tmp" ] && (umask 077 && set -o noclobber && tail -100 "$_qar_file" > "$_qar_tmp") && mv "$_qar_tmp" "$_qar_file"; then
-          log "Queue overflow: truncated from $_qar_lines to 100 lines ($(basename "$_qar_file"))"
-          dbg "Queue overflow: truncated from $_qar_lines to 100 lines ($_qar_file)"
+        if [ ! -e "$_qar_tmp" ] && [ ! -L "$_qar_tmp" ] && (umask 077 && set -o noclobber && tail -100 "$_qar_file" 2>/dev/null > "$_qar_tmp") && mv "$_qar_tmp" "$_qar_file"; then
+          log "Queue overflow: truncated from $_QAR_LINES to 100 lines ($(basename "$_qar_file"))"
+          dbg "Queue overflow: truncated from $_QAR_LINES to 100 lines ($_qar_file)"
         else
           rm -f "$_qar_tmp" 2>/dev/null || true
           log "Queue overflow: not truncated, its copy could not be written ($(basename "$_qar_file"))"
@@ -468,22 +498,26 @@ queue_append_both() {
   local _qab_memory_root="$1" _qab_memory_queue="$2"
   local _qab_curation_root="$3" _qab_curation_queue="$4"
   local _qab_memory_enabled="$5" _qab_curation_enabled="$6"
-  local _qab_role="$7" _qab_content="$8" _qab_ts="$9" _qab_row=""
+  local _qab_role="$7" _qab_content="$8" _qab_ts="$9" _qab_sid="${10:-}" _qab_both="false"
+  local _QAR_ROW="" _QAR_MEMORY_ROW=""
 
   # A paused queue reads as not enabled: the gate comes before the row is built.
   _qar_gate "$_qab_memory_root" "$_qab_memory_enabled" "$_qab_curation_root" "$_qab_curation_enabled"
   _qab_memory_enabled="$_QAR_MEMORY_ON"
   _qab_curation_enabled="$_QAR_CURATION_ON"
   if [ "$_qab_memory_enabled" != "true" ] && [ "$_qab_curation_enabled" != "true" ]; then return 0; fi
-  # One row for both queues: it is built once, and each enabled queue takes the same line.
-  _qar_build_row "$_qab_role" "$_qab_content" "$_qab_ts" || return 0
-  _qab_row="$_QAR_ROW"
+  if [ "$_qab_memory_enabled" != "true" ] || ! queue_session_id_valid "$_qab_sid"; then
+    _qab_sid=""
+  elif [ "$_qab_curation_enabled" = "true" ]; then
+    _qab_both="true"
+  fi
+  _qar_build_row "$_qab_role" "$_qab_content" "$_qab_ts" "$_qab_sid" "$_qab_both" || return 0
 
   if [ "$_qab_memory_enabled" = "true" ]; then
-    if _qar_append "$_qab_memory_root" "$_qab_memory_queue" "$_qab_row"; then _qar_trim_overflow "$_QAR_FILE"; fi
+    if _qar_append "$_qab_memory_root" "$_qab_memory_queue" "${_QAR_MEMORY_ROW:-$_QAR_ROW}"; then _qar_trim_overflow "$_QAR_FILE"; fi
   fi
   if [ "$_qab_curation_enabled" = "true" ]; then
-    if _qar_append "$_qab_curation_root" "$_qab_curation_queue" "$_qab_row"; then _qar_trim_overflow "$_QAR_FILE"; fi
+    if _qar_append "$_qab_curation_root" "$_qab_curation_queue" "$_QAR_ROW"; then _qar_trim_overflow "$_QAR_FILE"; fi
   fi
   return 0
 }
@@ -521,18 +555,13 @@ queue_read_gates() {
   _QG_CURATION="true"
 
   if [ -n "$_qg_manifest" ] && [ -f "$_qg_manifest" ]; then
-    # D-GATES-FAST-PATH: every capture hook and every session start pays this
-    # read, and on most machines both switches are on. Only a JSON boolean
-    # `false` under a "memory", "curation", "learning" or "decisions" key can
-    # switch anything off, and a `\u` escape is the only JSON spelling of a
-    # letter other than the letter itself, so without one such a key appears
-    # literally. A text holding no `\u` and no key-then-`false` sequence
-    # therefore cannot switch anything off -- valid or not, it reads both-on
-    # either way -- and is settled by shell builtins (read, case, [[ =~ ]]) with
-    # no jq/node fork; everything else takes the full parse below. `read -d ''`
-    # succeeds only on reaching a NUL byte, i.e. before the end of the file, so a
-    # text it cut short is parsed in full too. An unreadable file reads empty
-    # and fails open, as the parser would.
+    # D-GATES-FAST-PATH: new installs set memory to false, so each hook pays
+    # one parser fork for the gate. Only a JSON boolean `false` under a
+    # "memory", "curation", "learning" or "decisions" key can switch a feature
+    # off. With no `\u` escape, such a key appears literally. With no escape
+    # and no key followed by `false`, builtins can settle the gate as both-on.
+    # `read -d ''` succeeds when it stops at a NUL byte. In that case, use the
+    # full parser too. An unreadable file reads as empty and leaves both on.
     local _qg_re='"(memory|curation|learning|decisions)"[[:space:]]*:[[:space:]]*false'
     IFS= read -r -d '' _qg_text 2>/dev/null < "$_qg_manifest" && _qg_parse="true"
     case "$_qg_text" in *'\u'*) _qg_parse="true" ;; esac

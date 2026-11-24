@@ -396,6 +396,7 @@ d .devflow/scripts/hud/components/
 - .devflow/scripts/hud/components/todo-progress.js
 - .devflow/scripts/hud/components/usage-quota.js
 - .devflow/scripts/hud/components/version-badge.js
+- .devflow/scripts/hud/components/week-forecast.js
 - .devflow/scripts/hud/components/worktree-count.js
 - .devflow/scripts/hud/config.js
 - .devflow/scripts/hud/cost-history.js
@@ -465,15 +466,6 @@ d sub/
             "timeout": 10
           }
         ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "<HOME>/.devflow/scripts/hooks/run-hook memory-worker",
-            "timeout": 10
-          }
-        ]
       }
     ],
     "SessionStart": [
@@ -482,15 +474,6 @@ d sub/
           {
             "type": "command",
             "command": "<HOME>/.devflow/scripts/hooks/run-hook session-start-orchestrator",
-            "timeout": 10
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "<HOME>/.devflow/scripts/hooks/run-hook session-start-memory",
             "timeout": 10
           }
         ]
@@ -515,17 +498,6 @@ d sub/
           }
         ],
         "matcher": "AskUserQuestion"
-      }
-    ],
-    "PreCompact": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "<HOME>/.devflow/scripts/hooks/run-hook pre-compact-memory",
-            "timeout": 10
-          }
-        ]
       }
     ]
   },
@@ -586,7 +558,7 @@ d sub/
   ],
   "features": {
     "ambient": true,
-    "memory": true,
+    "memory": false,
     "hud": true,
     "knowledge": true,
     "curation": true,

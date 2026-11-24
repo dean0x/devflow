@@ -6,7 +6,8 @@
  * Updates:
  *   - package.json
  *   - package-lock.json (via npm install --package-lock-only)
- *   - CHANGELOG.md ([Unreleased] → [version] - date + compare link)
+ *   - CHANGELOG.md ([Unreleased] → [version] - date + compare link, and a new
+ *     empty [Unreleased] section above it)
  *
  * Writes extracted release notes to stdout.
  */
@@ -103,10 +104,11 @@ if (versionHeaderExists) {
     fail('CHANGELOG.md has no [Unreleased] section');
   }
 
-  // Replace [Unreleased] header with versioned header
+  // Replace [Unreleased] header with versioned header, below a new empty
+  // [Unreleased] section for the next release
   changelog = changelog.replace(
     '## [Unreleased]',
-    `## [${newVersion}] - ${today()}`
+    `## [Unreleased]\n\n---\n\n## [${newVersion}] - ${today()}`
   );
 
   // Insert compare link before the old version's link reference

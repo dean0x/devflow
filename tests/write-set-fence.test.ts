@@ -259,8 +259,8 @@ const seedNoDenyList = (sb: Sandbox): void => {
  * leaves the install where it found it.
  */
 export const FENCE_ROWS: readonly FenceRow[] = [
-  { args: ['memory', '--disable'], allow: [SETTINGS, MANIFEST], mustWrite: true },
   { args: ['memory', '--enable'], allow: [SETTINGS, MANIFEST], mustWrite: true },
+  { args: ['memory', '--disable'], allow: [SETTINGS, MANIFEST], mustWrite: true },
   { args: ['memory', '--clear'], allow: [REPO_MEMORY], mustWrite: true, seed: seedMemoryQueue },
   { args: ['memory', '--status'], allow: NONE, mustWrite: false },
 

@@ -1,6 +1,6 @@
 # install-snapshot golden — config: github (#388 AC-2, AC-3, AC-4)
 # Records TODAY's behaviour, bugs included: a later PR that changes a section says why in its fixture-only test(snapshot): commit.
-# argv: devflow init --recommended --security user  (cwd <REPO>, HOME <HOME>, stdin not a TTY), run twice; then devflow uninstall
+# argv: devflow init --recommended --memory --security user  (cwd <REPO>, HOME <HOME>, stdin not a TTY), run twice; then devflow uninstall
 # Regenerate: npm run test:golden:update -- install-snapshot  (fixture-only test(snapshot): commit)
 # Normalised: sandbox paths (logical + realpath), ISO timestamps, the package version. Walk lines: d dir/, x executable, - file, l link.
 
@@ -378,6 +378,7 @@ d .devflow/scripts/hud/components/
 - .devflow/scripts/hud/components/todo-progress.js
 - .devflow/scripts/hud/components/usage-quota.js
 - .devflow/scripts/hud/components/version-badge.js
+- .devflow/scripts/hud/components/week-forecast.js
 - .devflow/scripts/hud/components/worktree-count.js
 - .devflow/scripts/hud/config.js
 - .devflow/scripts/hud/cost-history.js

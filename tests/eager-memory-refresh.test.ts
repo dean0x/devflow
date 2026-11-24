@@ -141,6 +141,7 @@ afterEach(() => {
 
 /** Tools the worker and its sourced helpers call. None of them is a JSON parser. */
 const FARM_TOOLS = [
+  'od',
   // /usr/bin on macOS; /usr/bin or /bin on Linux
   'wc', 'head', 'tail', 'tr', 'touch', 'stat', 'sed', 'cut',
   'nohup', 'git', 'find', 'grep', 'mktemp', 'dirname', 'cksum',
@@ -1343,14 +1344,8 @@ exit 0
 // =============================================================================
 // S16 — Queue-claim lost-race: mv fails → SKIP path, queue preserved
 //
-// Tests worker line: mv "$QUEUE_FILE" "$PROCESSING_FILE" 2>/dev/null ||
-//   { log "SKIP: failed to claim queue (race condition — another worker got it)"; exit 0; }
-//
-// The mv failure is simulated by pre-creating the PROCESSING_FILE destination as a
-// read-only directory, causing mv to fail (cannot rename into a non-writable dir).
-// This is the most faithful simulation of a concurrent-worker race: the second worker
-// finds the queue file present but cannot claim it.
-// Behavioral coverage: test observable outcomes, not implementation strings.
+// A folder at the batch path blocks the claim before mv. With a clear path, a
+// failed mv has its own log message. Both cases must leave the queue in place.
 // =============================================================================
 describe('S16: queue-claim lost-race — mv failure takes SKIP path, queue preserved', () => {
   let projectDir: string;
@@ -1367,43 +1362,37 @@ describe('S16: queue-claim lost-race — mv failure takes SKIP path, queue prese
   });
 
   afterEach(() => {
-    // Restore permissions so rmSync can recurse
-    const memDir = path.join(projectDir, '.devflow', 'memory');
-    try { execSync(`chmod -R 755 "${memDir}"`, { stdio: 'ignore' }); } catch { /* ignore */ }
     fs.rmSync(projectDir, { recursive: true, force: true });
     fs.rmSync(homeDir, { recursive: true, force: true });
     fs.rmSync(shimDir, { recursive: true, force: true });
   });
 
-  it('mv failure → SKIP logged, worker exits 0, queue file preserved, no memory write', () => {
-    const memFile       = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
-    const queueFile     = path.join(projectDir, '.devflow', 'memory', '.pending-turns.jsonl');
-    const processingDir = path.join(projectDir, '.devflow', 'memory', '.pending-turns.processing');
+  it.each([
+    ['a folder blocks the batch path', 'SKIP: a queue or recovery path is not a regular file'],
+    ['the claim move fails', 'SKIP: failed to claim queue (race condition'],
+  ] as const)('keeps the queue when %s', (scenario, message) => {
+    const memoryDir = path.join(projectDir, '.devflow', 'memory');
+    const memFile = path.join(memoryDir, 'WORKING-MEMORY.md');
+    const queueFile = path.join(memoryDir, '.pending-turns.jsonl');
 
     createFakeClaudeShim(shimDir, memFile);
     seedQueue(projectDir);
-
-    // Pre-create .pending-turns.processing as a read-only directory.
-    // mv .pending-turns.jsonl .pending-turns.processing will attempt to rename INTO
-    // this directory; with mode 555 that rename fails (EACCES on macOS).
-    fs.mkdirSync(processingDir);
-    fs.chmodSync(processingDir, 0o555);
+    if (scenario === 'a folder blocks the batch path') {
+      fs.mkdirSync(path.join(memoryDir, '.pending-turns.processing'));
+    } else {
+      writeFakeExecutable(path.join(shimDir, 'mv'), `#!/bin/bash
+case "$1" in */.pending-turns.jsonl) exit 1 ;; esac
+exec /bin/mv "$@"
+`);
+    }
+    const queueBytes = fs.readFileSync(queueFile);
 
     const { exitCode } = runWorker(projectDir, homeDir, shimDir);
 
-    // Worker must exit 0 (SKIP is a clean exit, not a crash)
     expect(exitCode).toBe(0);
-
-    // WORKING-MEMORY.md must NOT be written (worker bailed before claude invocation)
     expect(fs.existsSync(memFile)).toBe(false);
-
-    // Queue file must still exist — mv failed so the queue was not consumed
-    expect(fs.existsSync(queueFile)).toBe(true);
-
-    // Log must contain the SKIP message for this exact path
-    const logFile = workerLogPath(projectDir, homeDir);
-    const logContent = fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8') : '';
-    expect(logContent).toContain('SKIP: failed to claim queue (race condition');
+    expect(fs.readFileSync(queueFile)).toEqual(queueBytes);
+    expect(fs.readFileSync(workerLogPath(projectDir, homeDir), 'utf-8')).toContain(message);
   });
 });
 
@@ -2279,20 +2268,19 @@ describe('S22: pre-compact bootstrap stamp and canonical sections (B2)', () => {
     expect(ctx).not.toContain('synced @ unknown');
   });
 
-  it('git repo + no existing WORKING-MEMORY.md: bootstrap includes all 5 canonical sections', () => {
+  it('git repo + no existing WORKING-MEMORY.md: bootstrap has only Now and Progress', () => {
     initGitRepo(projectDir);
     const memFile = path.join(projectDir, '.devflow', 'memory', 'WORKING-MEMORY.md');
+    const stubDir = path.join(homeDir, 'stub-bin');
+    const claudeRan = path.join(homeDir, 'claude-ran');
+    fs.mkdirSync(stubDir);
+    writeFakeExecutable(path.join(stubDir, 'claude'), `#!/bin/bash\ntouch "${claudeRan}"\nexit 1\n`);
 
-    runHook(PRE_COMPACT_HOOK, { cwd: projectDir }, homeDir);
+    runHook(PRE_COMPACT_HOOK, { cwd: projectDir }, homeDir, { PATH: `${stubDir}:${process.env.PATH ?? '/usr/bin:/bin'}` });
 
     const content = fs.readFileSync(memFile, 'utf-8');
-    expect(content).toContain('## Now');
-    expect(content).toContain('## Progress');
-    expect(content).toContain('## Decisions');
-    expect(content).toContain('## Context');
-    expect(content).toContain('## Session Log');
-    // The old ## Modified Files section must not appear
-    expect(content).not.toContain('## Modified Files');
+    expect(content.match(/^## .*$/gm)).toEqual(['## Now', '## Progress']);
+    expect(fs.existsSync(claudeRan)).toBe(false);
   });
 
   it('non-git directory: bootstrap is skipped, no WORKING-MEMORY.md created', () => {
@@ -3401,7 +3389,8 @@ describe('S27: the memory hooks never write through a symbolic link under .devfl
 
     expect(fs.existsSync(created), 'touch never follows the link').toBe(false);
     expect(fs.readlinkSync(okFile), 'the link is left as it was').toBe(created);
-    expect(fs.readFileSync(path.join(memoryDir, 'WORKING-MEMORY.md'), 'utf-8'), 'non-vacuity: the refresh landed').toContain('memory-head: testsha');
+    const headSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: projectDir, encoding: 'utf-8' }).trim();
+    expect(fs.readFileSync(path.join(memoryDir, 'WORKING-MEMORY.md'), 'utf-8'), 'non-vacuity: the refresh landed').toContain(`memory-head: ${headSha} `);
     expect(refusals('background-memory-update'), 'the skipped stamp is logged once').toHaveLength(1);
   });
 

@@ -20,7 +20,8 @@ import * as path from 'path';
 import * as net from 'net';
 import * as http from 'http';
 import * as https from 'https';
-import { spawn as cpSpawn } from 'child_process';
+import { execFile, spawn as cpSpawn } from 'child_process';
+import { promisify } from 'node:util';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
 import {
@@ -126,6 +127,11 @@ const AUTH_MODE_MAX_LEN = 32;
  * (e.g. an SSE stream on the same port that --disable probes).
  */
 const BODY_CAP_BYTES = 64 * 1024;
+/** Bound the version probe without using a shell wrapper. */
+const RELAY_VERSION_TIMEOUT_MS = 1500;
+/** Deadline for the detach launcher to report readiness. */
+const RELAY_DETACH_DEADLINE_MS = 12_000;
+const execFileAsync = promisify(execFile);
 /** Timeout for the relay doctor subprocess (ms). */
 const DOCTOR_TIMEOUT_MS = 10_000;
 /**
@@ -732,6 +738,8 @@ export function buildRealPreflightDeps(opts: BuildRealPreflightDepsOptions): Pro
  * All I/O is behind this interface so every relay spawn path is unit-testable.
  */
 export interface SpawnAndWaitDeps {
+  /** Ask the installed relay to detach. Undefined means it cannot detach. */
+  tryDetach?: (binPath: string, port: number, env: Record<string, string>) => Promise<DetachedRelayResult | undefined>;
   /** Open logPath for appending. Returns fd + close function. */
   openLog: (logPath: string) => Promise<{ fd: number; close: () => Promise<void> }>;
   /**
@@ -760,10 +768,11 @@ export interface SpawnAndWaitDeps {
   tcpConnectable: (port: number, timeoutMs: number) => Promise<boolean>;
 }
 
-/** Result type for spawnRelayAndWaitForPort. */
-export type SpawnRelayResult =
-  | { ok: true; spawnedPid?: number } // spawnedPid present when self-spawned; absent on adopted path
-  | { ok: false; reason: string };
+type RelayStartFailure = { ok: false; reason: string };
+type DetachedRelayResult = { ok: true; reportedPid?: number } | RelayStartFailure;
+
+/** Only a relay started by Devflow itself can have a spawnedPid. */
+export type SpawnRelayResult = { ok: true; spawnedPid?: number } | RelayStartFailure;
 
 /**
  * Spawn the relay (unless adopted) and wait up to 50×100ms for TCP accept.
@@ -793,13 +802,20 @@ export async function spawnRelayAndWaitForPort(
     return { ok: true };
   }
 
-  const logHandle = await deps.openLog(logPath);
-
-  let spawnError: Error | undefined;
-  // SEC-2: allowlist env for the relay — only PATH/HOME/TMPDIR/LANG/LC_ALL are
-  // inherited; SUBSWITCH_CONFIG is the only process-specific addition here.
+  // Share the allowlisted environment across the version probe and both starts.
   const env = { ...scrubChildEnv(), SUBSWITCH_CONFIG: configPath };
+  const detached = await deps.tryDetach?.(binPath, port, env);
+  if (detached !== undefined) {
+    if (!detached.ok) return detached;
+    // The launcher can report a relay that already owns the port. Record its PID only for status.
+    if (detached.reportedPid !== undefined) await deps.writePid(pidPath, detached.reportedPid);
+    return await deps.tcpConnectable(port, RELAY_SPAWN_PER_PROBE_TIMEOUT_MS)
+      ? { ok: true }
+      : { ok: false, reason: 'relay-not-started' };
+  }
 
+  const logHandle = await deps.openLog(logPath);
+  let spawnError: Error | undefined;
   const { pid } = deps.spawnProcess({
     execPath: process.execPath,
     args: [binPath, 'serve'],
@@ -847,10 +863,61 @@ export async function spawnRelayAndWaitForPort(
   return { ok: true, spawnedPid: pid };
 }
 
+async function tryDetachedRelayStart(
+  binPath: string,
+  port: number,
+  env: Record<string, string>,
+  cwd: string,
+): Promise<DetachedRelayResult | undefined> {
+  if (process.platform !== 'darwin' && process.platform !== 'linux') return undefined;
+
+  const version = await execFileAsync(process.execPath, [binPath, '--version'], {
+    env, timeout: RELAY_VERSION_TIMEOUT_MS, killSignal: 'SIGKILL', maxBuffer: 2048,
+  }).catch(() => undefined);
+  const match = version?.stdout.match(/([0-9]+)\.([0-9]+)\.[0-9]+/);
+  if (!match || (Number(match[1]) === 0 && Number(match[2]) < 9)) return undefined;
+
+  // The launcher owns the readiness wait and the relay owns its logs.
+  return new Promise((resolve) => {
+    const proc = cpSpawn(process.execPath, [binPath, 'serve', '--detach', '--port', String(port)], {
+      cwd, env, stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    let stdout: string | undefined = '';
+    proc.stdout.on('data', (chunk: Buffer) => {
+      if (stdout !== undefined) {
+        stdout = stdout.length + chunk.length <= 32 ? stdout + chunk.toString() : undefined;
+      }
+    });
+    const failed: RelayStartFailure = { ok: false, reason: 'relay-not-started' };
+    const timer = setTimeout(() => {
+      try { proc.kill('SIGKILL'); } catch { /* best effort */ }
+      proc.stdout.destroy();
+      proc.unref();
+      resolve(failed);
+    }, RELAY_DETACH_DEADLINE_MS);
+    const finish = (result: DetachedRelayResult): void => {
+      clearTimeout(timer);
+      resolve(result);
+    };
+    proc.once('error', () => finish(failed));
+    proc.once('close', (code) => {
+      if (code !== 0) {
+        finish(failed);
+        return;
+      }
+      const pid = stdout !== undefined && /^[0-9]+\n?$/.test(stdout) ? Number(stdout) : 0;
+      finish({ ok: true, reportedPid: pid > 0 && pid <= 0x7fffffff ? pid : undefined });
+    });
+  });
+}
+
 /** Build the real (production) SpawnAndWaitDeps. Not exported — internal to runEnable. */
-function buildRealSpawnAndWaitDeps(): SpawnAndWaitDeps {
+function buildRealSpawnAndWaitDeps(devflowDir: string): SpawnAndWaitDeps {
   return {
+    tryDetach: (binPath, port, env) => tryDetachedRelayStart(binPath, port, env, devflowDir),
     openLog: async (logPath) => {
+      // Rotate only before legacy start, before the relay holds an append fd.
+      await rotateProxyLogIfLarge(logPath);
       // openProxyLog: 0700 parent dir + 0600 file creation + best-effort chmod (SEC-2).
       const handle = await openProxyLog(logPath);
       return { fd: handle.fd, close: () => handle.close() };
@@ -1570,11 +1637,6 @@ async function runEnable(portOption: string | undefined): Promise<void> {
   // dirs are unaffected by mkdir). openProxyLog handles individual file mode.
   await fs.mkdir(path.join(devflowDir, 'logs'), { recursive: true, mode: 0o700 });
 
-  // SEC-2 pre-spawn rotation: rotate proxy.log before the relay opens an fd on it.
-  // MUST run before spawnRelayAndWaitForPort (Step 5) — a rename while the relay
-  // holds an append fd would orphan that fd. At this point no relay is running.
-  await rotateProxyLogIfLarge(logPath);
-
   // Read existing routing config to preserve user-added anthropic/limits/logLevel/providers
   // blocks. A missing or malformed file falls back to clean defaults inside
   // buildRoutingConfigJson (non-fatal).
@@ -1659,7 +1721,7 @@ async function runEnable(portOption: string | undefined): Promise<void> {
     logPath,
     pidPath,
     adopted,
-    buildRealSpawnAndWaitDeps(),
+    buildRealSpawnAndWaitDeps(devflowDir),
   );
   if (!spawnResult.ok) {
     await rollbackProxyState();

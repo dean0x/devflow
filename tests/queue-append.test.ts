@@ -191,6 +191,58 @@ describe('queue_append_row', () => {
       expect(fs.existsSync(`${q}.lock`)).toBe(false);
     });
 
+    it.each([
+      ['before the locked count', 'mkdir() { command mkdir "$@" && { if [ "$1" = "$q.lock" ]; then mv "$q" "$claimed"; fi; }; }'],
+      ['before the trim copy', 'tail() { mv "$q" "$claimed" && command tail "$@"; }'],
+    ])('leaves no output or replacement when the queue moves %s', (_point, moveQueue) => {
+      const q = path.join(tmpDir, 'q.jsonl');
+      const claimed = path.join(tmpDir, 'claimed.jsonl');
+      fs.writeFileSync(q, '{"role":"user","content":"seed","ts":1}\n'.repeat(200));
+
+      const run = spawnSync('bash', ['-c', withQueueAppend(`
+        q="$1"; claimed="$2"
+        ${moveQueue}
+        queue_append_row "${tmpDir}" "$q" user final 2
+      `), '--', q, claimed], { encoding: 'utf8' });
+
+      expect(run.status, run.stderr).toBe(0);
+      expect(run.stderr).toBe('');
+      expect(run.stdout).toBe('');
+      expect(fs.readdirSync(tmpDir)).toEqual(['claimed.jsonl']);
+      expect(readJsonl(claimed)).toHaveLength(201);
+    });
+
+    it.each(['', 'not-a-count'])('does not trim when the line count is %j', (count) => {
+      const q = path.join(tmpDir, 'q.jsonl');
+      fs.writeFileSync(q, '{"role":"user","content":"seed","ts":1}\n'.repeat(200));
+
+      const run = spawnSync('bash', ['-c', withQueueAppend(`
+        count="$1"
+        wc() { printf '%s\\n' "$count"; }
+        queue_append_row "${tmpDir}" "${q}" user final 2
+      `), '--', count], { encoding: 'utf8' });
+
+      expect(run.status, run.stderr).toBe(0);
+      expect(run.stderr).toBe('');
+      expect(fs.readdirSync(tmpDir)).toEqual(['q.jsonl']);
+      expect(readJsonl(q)).toHaveLength(201);
+    });
+
+    it('keeps the whole queue when its lock is held', () => {
+      const q = path.join(tmpDir, 'q.jsonl');
+      fs.writeFileSync(q, '{"role":"user","content":"seed","ts":1}\n'.repeat(200));
+      fs.mkdirSync(`${q}.lock`);
+
+      const { exitCode, stderr } = runWithQueueAppend(`
+        sleep() { :; }
+        queue_append_row "${tmpDir}" "${q}" user final 2
+      `);
+
+      expect(exitCode, stderr).toBe(0);
+      expect(fs.readdirSync(tmpDir).sort()).toEqual(['q.jsonl', 'q.jsonl.lock']);
+      expect(readJsonl(q)).toHaveLength(201);
+    });
+
     it('keeps the memory and the curation queue at mode 0600 through the trim, whatever the caller umask', () => {
       // A queue holds captured conversation text, so it is created 0600. The trim
       // replaces it with a renamed copy, and from then on the file has the copy's
@@ -433,10 +485,10 @@ describe('queue_append_both: one row build, and the caller umask kept', () => {
   const forks = (): string[] => (fs.existsSync(forkLog) ? fs.readFileSync(forkLog, 'utf-8').trim().split('\n').filter(Boolean) : []);
   const modeOf = (file: string): string => (fs.statSync(file).mode & 0o777).toString(8);
   /** Both appends in one process, then the umask the process ends with. */
-  const both = (setup: string, flags = '"true" "true"', env?: NodeJS.ProcessEnv): { stdout: string; stderr: string; exitCode: number } =>
+  const both = (setup: string, flags = '"true" "true"', env?: NodeJS.ProcessEnv, sid = ''): { stdout: string; stderr: string; exitCode: number } =>
     runWithQueueAppend(
-      `${setup}\nqueue_append_both "${root}" "${memory}" "${root}" "${curation}" ${flags} "user" "we chose X over Y" "5"\numask`,
-      env,
+      `${setup}\nqueue_append_both "${root}" "${memory}" "${root}" "${curation}" ${flags} "user" "we chose X over Y" "5" "$QUEUE_TEST_SID"\numask`,
+      { ...(env ?? process.env), QUEUE_TEST_SID: sid },
     );
 
   it('memory then curation in one process: the curation folder gets the mode of a mkdir under the caller umask, and both queues are 0600', () => {
@@ -482,29 +534,61 @@ describe('queue_append_both: one row build, and the caller umask kept', () => {
     expect(modeOf(curation)).toBe('600');
   });
 
+  it.each(['{}\n', '\n{}\n', '{}\n\n', '{}\n{}\n{}\n', '{}\n{}\n\n'])('writes neither row with build output %j', (output) => {
+    const { exitCode, stderr } = both(
+      '_HAS_JQ=true; jq() { printf "%s" "$QUEUE_TEST_ROWS"; }',
+      '"true" "true"',
+      { ...process.env, QUEUE_TEST_ROWS: output },
+      'session',
+    );
+
+    expect(exitCode, stderr).toBe(0);
+    expect(fs.existsSync(memory)).toBe(false);
+    expect(fs.existsSync(curation)).toBe(false);
+  });
+
   for (const backend of [{ name: 'jq', noJq: false, tool: 'jq' }, { name: 'node fallback', noJq: true, tool: 'node' }]) {
     describe(`${backend.name} backend`, () => {
       const setup = backend.noJq ? '_HAS_JQ=false' : '';
 
-      it('both queues on: both get the identical line, and the row is built by one process', () => {
-        const { exitCode, stderr } = both(setup, '"true" "true"', shimEnv());
+      const row = { role: 'user', content: 'we chose X over Y', ts: 5 };
+      const sid = `A-z_09${'a'.repeat(58)}`;
+
+      it('builds both rows in one process and adds the ID only to memory', () => {
+        const { exitCode, stderr } = both(setup, '"true" "true"', shimEnv(), sid);
 
         expect(exitCode, stderr).toBe(0);
-        const memoryText = fs.readFileSync(memory, 'utf-8');
-        expect(memoryText).toBe(fs.readFileSync(curation, 'utf-8'));
-        expect(memoryText.split('\n')).toHaveLength(2);
-        expect(JSON.parse(memoryText)).toEqual({ role: 'user', content: 'we chose X over Y', ts: 5 });
+        expect(readJsonl(memory)).toEqual([{ ...row, session_id: sid }]);
+        expect(fs.readFileSync(curation, 'utf-8')).toBe(JSON.stringify(row) + '\n');
         expect(forks()).toEqual([backend.tool]);
       });
 
-      it('one queue on: one build; neither on: no build and no file', () => {
-        expect(both(setup, '"false" "true"', shimEnv()).exitCode).toBe(0);
+      it('builds a memory-only row with the ID in one process', () => {
+        expect(both(setup, '"true" "false"', shimEnv(), sid).exitCode).toBe(0);
+        expect(forks()).toEqual([backend.tool]);
+        expect(readJsonl(memory)).toEqual([{ ...row, session_id: sid }]);
+        expect(fs.existsSync(curation)).toBe(false);
+      });
+
+      it.each(['', 'a\n', 'a\t', 'a\x01b', '../a', 'a'.repeat(65)])('uses the same row for both queues with ID %j', (id) => {
+        expect(both(setup, '"true" "true"', shimEnv(), id).exitCode).toBe(0);
+        for (const file of [memory, curation]) {
+          expect(fs.readFileSync(file, 'utf-8')).toBe(JSON.stringify(row) + '\n');
+        }
+        expect(forks()).toEqual([backend.tool]);
+      });
+
+      it('builds only the original row for curation, and skips the build with neither queue on', () => {
+        expect(both(setup, '"false" "true"', shimEnv(), sid).exitCode).toBe(0);
         expect(forks()).toEqual([backend.tool]);
         expect(fs.existsSync(memory)).toBe(false);
+        expect(fs.readFileSync(curation, 'utf-8')).toBe(JSON.stringify(row) + '\n');
 
         fs.rmSync(forkLog, { force: true });
-        expect(both(setup, '"false" "false"', shimEnv()).exitCode).toBe(0);
+        fs.rmSync(curation);
+        expect(both(setup, '"false" "false"', shimEnv(), sid).exitCode).toBe(0);
         expect(forks()).toEqual([]);
+        expect(fs.existsSync(curation)).toBe(false);
       });
     });
   }

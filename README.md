@@ -58,7 +58,7 @@ This is the **orchestrated flow** — you stay in the loop between every step. W
 
 **Up to 20 parallel Review agents.** Security, architecture, performance, complexity, consistency, regression, testing, and more. Each produces findings with severity, confidence scoring, and concrete fixes. Conditional Review agents activate when relevant (language focuses such as TypeScript for `.ts` files, database for schema changes, compliance when regulated surface detected in the diff). The gate level narrows these sets: the default `standard` level drops the TypeScript focus, and `lean` runs fewer focuses still. Every finding gets validated and resolved automatically.
 
-**Memory that persists.** Session context survives restarts, `/clear`, and context compaction. Your agent picks up exactly where it left off.
+**Working memory is off by default.** Run `devflow memory --enable` to keep a short note across restarts, `/clear`, and context compaction. The note has a limit of 8 KB (8,192 bytes). Use one worktree for each parallel session.
 
 **Decisions and pitfalls.** A background agent detects architectural decisions and known pitfalls from your session dialogs and writes them to `.devflow/curation/decisions.md` and `.devflow/curation/pitfalls.md` — informing every future review and implementation session without any manual bookkeeping.
 
@@ -88,9 +88,13 @@ Context ████░░░░ 42% · 5h ████░░░░ 45% (2h 15m)
 Opus 4.6 (1M) · 3 MCPs 2 rules · $1.42 · $18.50/wk · $62.30/mo
 ```
 
-For Codex limits, the HUD runs `tokenmeter hud` when its cache expires, usually after 30 seconds. tokenmeter checks recent Codex session logs in the background. By default, tokenmeter can start `codex app-server` at most about once per minute per data folder. Codex can then use its stored sign-in to request the limits from OpenAI over HTTP.
+**Claude week forecast, opt-in.** The forecast is off by default. Run `devflow hud --forecast` to show the estimated quota use at reset next to `7d`. Run `devflow hud --no-forecast` to turn it off. Run `devflow hud --status` to see your choice. Devflow saves your choice in the `forecast` field of `~/.devflow/hud.json`. `devflow init` keeps that choice. When the HUD and the forecast are on, the HUD adds the `weekForecast` component.
 
-To stop the app server and keep the log source, run `npx @dean0x/tokenmeter@0.2.0 config app_server off`.
+The HUD uses the same formula as the tokenmeter forecast, but it needs no tokenmeter data. It uses the current session's `rate_limits.seven_day` from Claude Code on stdin. The HUD treats that value as current at each update. It omits the forecast if the week data is absent or invalid. It also omits the forecast for about the first five hours of the quota week.
+
+For Codex limits, the HUD runs `tokenmeter hud` when its cache expires, usually after 30 seconds. tokenmeter checks recent Codex session logs in the background. By default, tokenmeter can start `codex app-server` at most about once per minute per data folder. Codex can then use its stored sign-in to request the limits and the account token usage from OpenAI over HTTP.
+
+To stop the app server and the account usage request, and keep the log source, run `npx @dean0x/tokenmeter@0.3.0 config app_server off`.
 
 The HUD shows the age of data that is at least 10 minutes old. If tokenmeter cannot find Codex on `PATH`, log data at least 10 minutes old does not show. If neither source has data, the HUD omits the Codex segment.
 
@@ -104,7 +108,9 @@ After an upgrade, run `devflow init` again. See the [HUD reference](https://gith
 npx devflow-kit init
 ```
 
-That's it. The interactive wizard offers Recommended defaults or an Advanced flow — plugin selection, feature configuration, compliance frameworks, the gate level, and security settings. Ambient mode, working memory, and curation are on by default. Non-interactive: `npx devflow-kit init --recommended`.
+The interactive wizard offers Recommended defaults or an Advanced flow with more options. On new installs, ambient mode and curation are on by default. Working memory is off. A standard re-init keeps your memory choice. `devflow init --reset` restores the off default.
+
+For non-interactive setup, run `npx devflow-kit init --recommended`.
 
 ## Privacy & Sharing
 

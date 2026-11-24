@@ -39,7 +39,7 @@ dbg "CWD=$CWD"
 # Anchor .devflow/ to the project root (prevents a stray nested .devflow/ when this
 # hook runs with a CWD inside .devflow/...). Empty → fall back to CWD.
 source "$SCRIPT_DIR/resolve-project-root" 2>/dev/null || true
-# The one-time notice the memory worker leaves (needs df_file_below from resolve-project-root).
+# Note limits, stamps and worker notices. Notices need df_file_below from resolve-project-root.
 source "$SCRIPT_DIR/memory-permission" || { echo "session-start-memory: failed to source memory-permission" >&2; exit 1; }
 PROJECT_ROOT="$(df_resolve_root "$CWD" 2>/dev/null || true)"
 [ -n "$PROJECT_ROOT" ] || PROJECT_ROOT="$CWD"
@@ -103,41 +103,64 @@ if [ "${DF_TRACKED_AREA_MEMORY:-unknown}" != "untracked" ]; then
   exit 0
 fi
 
+# Refuse a linked parent once, before recovery or any memory read.
+if ! df_no_symlink_below "$PROJECT_ROOT" "$MEMORY_DIR"; then
+  log "Skipped: a symbolic link sits on the path to the memory folder"
+  exit 0
+fi
+
 # --- D56c cold-path recovery: orphaned .pending-turns.processing ---
-# Self-contained (not sourced from a shared helper): applies a 300s stale-age
-# gate to .pending-turns.processing. background-memory-update is the PRIMARY
-# recovery owner: it re-merges a leftover .processing under its own lock on
-# every spawn. This is the COLD-PATH fallback for when the worker never
-# re-spawns (memory disabled mid-flight, host offline, etc.): a SessionStart
-# arriving >300s after the crash with no intervening Stop hook.
-# Non-clobber: only recovers when .pending-turns.jsonl does NOT already exist,
-# so a concurrent session's fresh queue is never overwritten. Nor where a
-# symbolic link sits on the path to the batch or to the queue it is renamed onto
-# (D-HOOKS-NO-SYMLINK, git-marker): `mv` would move the batch into a folder a
-# linked memory folder or queue path names, and a linked batch would become a
-# linked queue.
+# The worker owns recovery. SessionStart moves a stale batch to an empty queue
+# under the same queue lock. A batch beside a claimed queue or merge copy still
+# needs the worker. If only the merge copy remains, it holds the complete batch.
 source "$SCRIPT_DIR/get-mtime" || { echo "session-start-memory: failed to source get-mtime" >&2; exit 1; }
 source "$SCRIPT_DIR/is-hex-sha" || { echo "session-start-memory: failed to source is-hex-sha" >&2; exit 1; }
+source "$SCRIPT_DIR/curation-lock" || { echo "session-start-memory: failed to source curation-lock" >&2; exit 1; }
 _SSM_PT_PROC="$MEMORY_DIR/.pending-turns.processing"
 _SSM_PT_JSONL="$MEMORY_DIR/.pending-turns.jsonl"
-if [ -f "$_SSM_PT_PROC" ]; then
-  _SSM_PT_MTIME=$(get_mtime "$_SSM_PT_PROC" 2>/dev/null || true)
-  _SSM_PT_MTIME="${_SSM_PT_MTIME:-0}"
-  _SSM_NOW_PT=$(date +%s)
-  _SSM_PT_AGE=$(( _SSM_NOW_PT - _SSM_PT_MTIME ))
-  if [ "$_SSM_PT_AGE" -gt 300 ]; then
-    if ! df_no_symlink_below "$PROJECT_ROOT" "$_SSM_PT_PROC" "$_SSM_PT_JSONL"; then
-      dbg "Stale .pending-turns.processing skipped — a symbolic link sits on its path or the queue's"
-      log "Stale .pending-turns.processing skipped (cold path): a symbolic link sits on the path to $_SSM_PT_PROC or $_SSM_PT_JSONL"
-    elif [ ! -f "$_SSM_PT_JSONL" ]; then
-      mv "$_SSM_PT_PROC" "$_SSM_PT_JSONL" 2>/dev/null || true
-      dbg "Recovered orphaned .pending-turns.processing (age ${_SSM_PT_AGE}s)"
-      log "Recovered orphaned .pending-turns.processing → .pending-turns.jsonl (cold path)"
-    else
-      dbg "Stale .pending-turns.processing skipped — .pending-turns.jsonl already exists"
-      log "Stale .pending-turns.processing skipped (cold path): .pending-turns.jsonl already exists"
-    fi
+_SSM_PT_CLAIMED="$_SSM_PT_PROC.claimed"
+_SSM_PT_MERGE="$_SSM_PT_PROC.merge"
+_SSM_PT_LOCK="$_SSM_PT_JSONL.lock"
+_SSM_REFUSED_PATH=""
+
+recover_stale_memory_batch() {
+  local _batch="$_SSM_PT_PROC" _mtime _age _path
+  if ! path_occupied "$_SSM_PT_PROC"; then _batch="$_SSM_PT_MERGE"; fi
+  if ! df_file_below "$PROJECT_ROOT" "$_batch"; then
+    _SSM_REFUSED_PATH="$_batch"
+    return 0
   fi
+  _mtime=$(get_mtime "$_batch" 2>/dev/null) || return 0
+  _age=$(( $(date +%s) - ${_mtime:-0} ))
+  [ "$_age" -gt 300 ] || return 0
+  for _path in "$_SSM_PT_JSONL" "$_SSM_PT_CLAIMED" "$_SSM_PT_MERGE"; do
+    if ! df_no_symlink_below "$PROJECT_ROOT" "$_path"; then
+      log "Stale .pending-turns.processing skipped (cold path): a symbolic link sits on the path to $_path"
+      _SSM_REFUSED_PATH="$_path"
+      return 0
+    fi
+  done
+  if path_occupied "$_SSM_PT_JSONL"; then
+    log "Stale .pending-turns.processing skipped (cold path): .pending-turns.jsonl already exists"
+    return 0
+  fi
+  if [ "$_batch" = "$_SSM_PT_PROC" ]; then
+    if path_occupied "$_SSM_PT_CLAIMED" || path_occupied "$_SSM_PT_MERGE"; then return 0; fi
+  else
+    rm -f "$_SSM_PT_CLAIMED" 2>/dev/null || return 0
+  fi
+  if mv -n "$_batch" "$_SSM_PT_JSONL" 2>/dev/null && ! path_occupied "$_batch"; then
+    dbg "Recovered orphaned .pending-turns.processing (age ${_age}s)"
+    log "Recovered orphaned .pending-turns.processing → .pending-turns.jsonl (cold path)"
+  fi
+  return 0
+}
+
+if { [ -f "$_SSM_PT_PROC" ] || [ -f "$_SSM_PT_MERGE" ]; } \
+    && df_no_symlink_below "$PROJECT_ROOT" "$_SSM_PT_LOCK" \
+    && curation_lock_acquire "$_SSM_PT_LOCK" 1; then
+  recover_stale_memory_batch
+  curation_lock_release "$_SSM_PT_LOCK"
 fi
 
 CONTEXT=""
@@ -146,41 +169,23 @@ CONTEXT=""
 
 MEMORY_FILE="$MEMORY_DIR/WORKING-MEMORY.md"
 
-# --- parse_and_validate_stamp: parse <!-- memory-head: <sha> branch: <name> --> from
-# line 1 and apply hex-validation security gate.  Sets STAMP_SHA, STAMP_BRANCH,
-# FIRST_LINE, and MEMORY_BODY in the caller's scope.
-# Treat WORKING-MEMORY.md as untrusted input (engineering rule: validate at boundaries;
-# assume input is malicious).  A value beginning with '-' or containing '..' could be a
-# git flag or unexpected revision range.  Reject anything that is not a hex object-id
-# (7–40 chars).  On mismatch fall through to the no-stamp path, preserving 3-state logic.
-parse_and_validate_stamp() {
-  local _content="$1"
-  FIRST_LINE=$(printf '%s' "$_content" | head -1 2>/dev/null || echo "")
-  STAMP_SHA=""
-  STAMP_BRANCH=""
-  case "$FIRST_LINE" in
-    "<!-- memory-head:"*)
-      # Extract sha and branch via sed (bash 3.2 compatible)
-      STAMP_SHA=$(echo "$FIRST_LINE" | sed -n 's/<!-- memory-head: \([^ ]*\) branch:.*/\1/p')
-      STAMP_BRANCH=$(echo "$FIRST_LINE" | sed -n 's/<!-- memory-head: [^ ]* branch: \([^ ]*\) -->/\1/p')
-      ;;
-  esac
-  # Hex-validation security gate — must stay before any git use of STAMP_SHA.
-  if [ -n "$STAMP_SHA" ] && ! is_hex_sha "$STAMP_SHA"; then
-    dbg "STAMP_SHA rejected (non-hex or out of range): $STAMP_SHA"
-    STAMP_SHA=""
-    STAMP_BRANCH=""
-  fi
-  dbg "STAMP_SHA=$STAMP_SHA STAMP_BRANCH=$STAMP_BRANCH"
-  # Strip stamp line from injected body
-  case "$FIRST_LINE" in
-    "<!-- memory-head:"*)
-      MEMORY_BODY=$(printf '%s' "$_content" | tail -n +2)
-      ;;
-    *)
-      MEMORY_BODY="$_content"
-      ;;
-  esac
+# Count the bytes from one bounded read. Keep final newlines with a suffix.
+# An end of file gives the full text. A null byte ends read early, so refuse it.
+read_bounded_memory_note() {
+  local LC_ALL=C _text
+  MEMORY_NOTE_BYTES="unknown"
+  MEMORY_CONTENT=""
+  [ -f "$1" ] && [ ! -L "$1" ] || return 1
+  _text=$(
+    set -o pipefail
+    head -c "$((MEMORY_NOTE_CAP_BYTES + 1))" "$1" 2>/dev/null | {
+      if IFS= read -r -d '' _note; then exit 1; fi
+      printf '%s.' "$_note"
+    }
+  ) || return 1
+  MEMORY_CONTENT="${_text%.}"
+  MEMORY_NOTE_BYTES="${#MEMORY_CONTENT}"
+  [ "$MEMORY_NOTE_BYTES" -le "$MEMORY_NOTE_CAP_BYTES" ]
 }
 
 # --- detect_refresh_failing <now> <memory_dir> <log_dir> <root>: sets
@@ -202,12 +207,13 @@ detect_refresh_failing() {
   local _proc_file="$_memory_dir/.pending-turns.processing"
   local _ok_file="$_memory_dir/.last-refresh-ok"
   local _queue_depth=0
-  if df_file_below "$_root" "$_queue_file" && [ -s "$_queue_file" ]; then
+  # Recovery already refused this path. Do not check it or log its refusal again.
+  if [ "$_queue_file" != "$_SSM_REFUSED_PATH" ] && df_file_below "$_root" "$_queue_file" && [ -s "$_queue_file" ]; then
     _queue_depth=$(wc -l < "$_queue_file" | tr -d ' ')
   fi
   # Also count lines in .processing — an orphaned batch left by a crashed worker
   # is unprocessed content even if .jsonl is empty (applies B4 blind-spot fix)
-  if df_file_below "$_root" "$_proc_file" && [ -s "$_proc_file" ]; then
+  if [ "$_proc_file" != "$_SSM_REFUSED_PATH" ] && df_file_below "$_root" "$_proc_file" && [ -s "$_proc_file" ]; then
     local _proc_depth
     _proc_depth=$(wc -l < "$_proc_file" | tr -d ' ')
     _queue_depth=$(( _queue_depth + _proc_depth ))
@@ -232,26 +238,37 @@ detect_refresh_failing() {
   fi
 }
 
-# D-HOOKS-NO-SYMLINK (git-marker): the working memory and the batches State C counts
-# are read into the session, so each is read only
-# where no symbolic link sits on its path; a file a link leads to is treated as
-# absent, and its refusal logged once.
-MEMORY_PRESENT=""
-if df_file_below "$PROJECT_ROOT" "$MEMORY_FILE"; then MEMORY_PRESENT="yes"; fi
-
-if [ -n "$MEMORY_PRESENT" ]; then
-  dbg "MEMORY_FILE exists: $MEMORY_FILE"
-  MEMORY_CONTENT=$(head -c 65536 "$MEMORY_FILE")
-
-  source "$SCRIPT_DIR/get-mtime" || { echo "session-start-memory: failed to source get-mtime" >&2; exit 1; }
+render_memory_context() {
   FILE_MTIME=$(get_mtime "$MEMORY_FILE")
-  NOW=$(date +%s)
   AGE_SEC=$(( NOW - FILE_MTIME ))
   AGE_MIN=$(( AGE_SEC / 60 ))
   dbg "MEMORY_FILE AGE=${AGE_SEC}s"
 
-  # --- Parse stamp from line 1: <!-- memory-head: <sha> branch: <name> --> ---
-  parse_and_validate_stamp "$MEMORY_CONTENT"
+  FIRST_LINE=${MEMORY_CONTENT%%$'\n'*}
+  MEMORY_BODY="$MEMORY_CONTENT"
+  memory_stamp_parse "$FIRST_LINE"
+  case "$FIRST_LINE" in
+    '<!-- memory-head:'*)
+      MEMORY_BODY=""
+      case "$MEMORY_CONTENT" in
+        *$'\n'*) MEMORY_BODY=${MEMORY_CONTENT#*$'\n'} ;;
+      esac
+      if [ -z "$STAMP_SHA" ] || [ -z "$STAMP_BRANCH" ] ||
+          { [[ "$FIRST_LINE" == *' multi: '* ]] && [ -z "$STAMP_MULTI" ]; } ||
+          { [[ "$FIRST_LINE" == *' session: '* ]] && [ -z "$STAMP_SESSION" ]; }; then
+        dbg "Memory stamp has a field that did not pass the format check"
+      fi
+      ;;
+  esac
+  if [ -z "$STAMP_SHA" ]; then STAMP_BRANCH=""; fi
+
+  MULTI_LABEL=""
+  MULTI_ADVICE=""
+  if [ -n "$STAMP_MULTI" ] && [ -n "$(memory_multi_epoch_from_line "$FIRST_LINE" "$NOW")" ]; then
+    MULTI_LABEL="; more than one session"
+    MULTI_ADVICE='This note holds work from more than one session. Check that it fits your task. Parallel sessions: use one worktree for each.
+'
+  fi
 
   # --- Gather current git state ---
   BRANCH=""
@@ -259,6 +276,11 @@ if [ -n "$MEMORY_PRESENT" ]; then
   if cd "$CWD" 2>/dev/null && git rev-parse --git-dir >/dev/null 2>&1; then
     BRANCH=$(git branch --show-current 2>/dev/null || echo "")
     HEAD=$(git rev-parse HEAD 2>/dev/null || echo "")
+  fi
+  _BRANCH_LABEL="$BRANCH"
+  if [ -n "$BRANCH" ] && ! _memory_stamp_branch_valid "$BRANCH"; then
+    _BRANCH_LABEL="unknown"
+    BRANCH=""
   fi
   dbg "BRANCH=$BRANCH HEAD=$HEAD"
 
@@ -297,9 +319,6 @@ if [ -n "$MEMORY_PRESENT" ]; then
     fi
   fi
 
-  # --- State C detection: refresh failing ---
-  detect_refresh_failing "$NOW" "$MEMORY_DIR" "$LOG_DIR" "$PROJECT_ROOT"
-
   # --- Build state-specific header ---
   # D-DETACHED-HEAD: where the session is, as one phrase. On a branch it is
   # `on <branch>`; on a detached HEAD — a commit checked out rather than a branch,
@@ -308,35 +327,46 @@ if [ -n "$MEMORY_PRESENT" ]; then
   # the state could not be read. HEAD passes the same hex gate the stamp does before
   # it is sliced into the header. Only an unreadable state is `on unknown`.
   _STAMP_LABEL="${STAMP_SHA:-unknown}"
-  if [ -n "$BRANCH" ]; then
-    _WHERE_LABEL="on ${BRANCH}"
+  if [ -n "$_BRANCH_LABEL" ]; then
+    _WHERE_LABEL="on ${_BRANCH_LABEL}"
   elif [ -n "$HEAD" ] && is_hex_sha "$HEAD"; then
     _WHERE_LABEL="detached @ ${HEAD:0:7}"
   else
     _WHERE_LABEL="on unknown"
   fi
 
-  if [ -z "$STAMP_SHA" ]; then
-    # No stamp (legacy / killed mid-write) — render as A "synced @ unknown"
-    MEMORY_HEADER="--- WORKING MEMORY (synced @ unknown ${_WHERE_LABEL}, ${AGE_MIN}m ago) ---"
-    dbg "State A (no stamp)"
-  elif [ "$COMMITS" -le 0 ]; then
-    # State A: in-sync
-    MEMORY_HEADER="--- WORKING MEMORY (synced @ ${_STAMP_LABEL} ${_WHERE_LABEL}, ${AGE_MIN}m ago) ---"
-    dbg "State A: in-sync"
+  if [ "$COMMITS" -le 0 ]; then
+    MEMORY_HEADER="--- WORKING MEMORY (synced @ ${_STAMP_LABEL} ${_WHERE_LABEL}, ${AGE_MIN}m ago${MULTI_LABEL}) ---"
+    dbg "State A: in-sync or no stamp"
   else
-    # State B: drifted — _DRIFT_LOG already populated from the single rev-walk above
-    MEMORY_HEADER="--- WORKING MEMORY (${COMMITS} commit(s) ago @ ${_STAMP_LABEL} ${_WHERE_LABEL}, ${AGE_MIN}m ago — ⚠ reconcile) ---
+    MEMORY_HEADER="--- WORKING MEMORY (${COMMITS} commit(s) ago @ ${_STAMP_LABEL} ${_WHERE_LABEL}, ${AGE_MIN}m ago — ⚠ reconcile${MULTI_LABEL}) ---
 Commits since memory was written:
 ${_DRIFT_LOG}"
     dbg "State B: drifted COMMITS=$COMMITS"
   fi
 
-  # --- Assemble context ---
   CONTEXT="${BRANCH_MISMATCH_NOTE}${MEMORY_HEADER}
-${MEMORY_BODY}"
+${MULTI_ADVICE}${MEMORY_BODY}"
+}
 
-  # State C banner shown IN ADDITION to A/B
+# D-HOOKS-NO-SYMLINK (git-marker): read the note only at a regular, unlinked path.
+MEMORY_PRESENT=""
+if df_file_below "$PROJECT_ROOT" "$MEMORY_FILE"; then MEMORY_PRESENT="yes"; fi
+
+if [ -n "$MEMORY_PRESENT" ]; then
+  NOTE_LOADED="false"
+  if read_bounded_memory_note "$MEMORY_FILE"; then NOTE_LOADED="true"; fi
+  NOW=$(date +%s)
+  if [ "$NOTE_LOADED" = "true" ]; then
+    render_memory_context
+  else
+    _cap="${MEMORY_NOTE_CAP_BYTES:0:${#MEMORY_NOTE_CAP_BYTES}-3},${MEMORY_NOTE_CAP_BYTES: -3}"
+    CONTEXT="Working memory not loaded: over the ${_cap}-byte cap; the next update rewrites it."
+    log "Working memory not loaded (bytes=$MEMORY_NOTE_BYTES)"
+  fi
+
+  detect_refresh_failing "$NOW" "$MEMORY_DIR" "$LOG_DIR" "$PROJECT_ROOT"
+  # Show the refresh banner even if the note was not loaded.
   if [ -n "$REFRESH_FAILING" ]; then
     CONTEXT="${CONTEXT}
 

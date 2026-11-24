@@ -77,7 +77,7 @@ const ROOT = path.resolve(import.meta.dirname, '..');
  * Expected exact-pinned version of the routing runtime.
  * Hoisted so the next bump is a one-line change.
  */
-const SUBSWITCH_VERSION = '0.8.0';
+const SUBSWITCH_VERSION = '0.9.0';
 
 /**
  * Expected exact-pinned version of the MDS compiler.
@@ -284,8 +284,8 @@ describe('Guard 3b (MDS pin): compiler pinned to an exact version in devDependen
 // ---------------------------------------------------------------------------
 
 const TOKENMETER_PACKAGE = '@dean0x/tokenmeter';
-const TOKENMETER_VERSION = '0.2.0';
-const TOKENMETER_INTEGRITY = 'sha512-Ll9Smj7VGRwzHr5mdWXCIXR9rZjYcRhRkx+mfm3MjiwmAx0HYROJPj2Sqvz8yW4esbJV9W8MQesUi04DkaoA4Q==';
+const TOKENMETER_VERSION = '0.3.0';
+const TOKENMETER_INTEGRITY = 'sha512-F3smu9prlQo4Gvana6pdJAf2QXs8AATyYcE17ttUSbMDl3raSEvo7Dw8Ho9cypbmitq/bxi9NKFwpztMc1b2MA==';
 
 describe('Guard 3c (tokenmeter pin): tokenmeter matches the approved release', () => {
   it('declares tokenmeter at the exact version in dependencies', async () => {

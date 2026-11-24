@@ -17,10 +17,14 @@ import { spawn, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { resolveOnPath } from './shell-hooks-helpers.js';
+import { useWarmFakeExecutables } from './helpers/warm-fake-executable.js';
+import { HOOK_RUN_ALLOWANCE_MS, NODE_EXEC_STALL_MS, resolveOnPath } from './shell-hooks-helpers.js';
+import { isolatedEnv } from './setup/home-isolation.js';
 
 const WORKER = path.resolve(__dirname, '../src/assets/scripts/hooks/background-memory-update');
 const STRESS = process.env.DEVFLOW_RUN_LINE_STRESS === '1';
+const RUN_BUDGET = HOOK_RUN_ALLOWANCE_MS + NODE_EXEC_STALL_MS;
+const writeFakeExecutable = useWarmFakeExecutables();
 
 /** Lines of the worker that run code: comment lines are dropped. */
 function workerCodeLines(): string[] {
@@ -66,11 +70,13 @@ describe('the memory worker writes one Run line per run', () => {
      * signal ends, each holding the exit trap. `prelude` and `transform` shape the harness;
      * the lines it prints say, per case, whether the lock is still held.
      */
-    function runHarness(prelude: string[], transform: (trap: string) => string): { status: number | null; stderr: string; lines: string[]; lockLeft: boolean } {
+    function runHarness(prelude: string[], transform: (trap: string) => string): { status: number | null; stderr: string; lines: string[]; locksLeft: string[] } {
       const root = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-trap-'));
       try {
         const lock = path.join(root, 'lock');
+        const queueLock = path.join(root, 'queue.lock');
         fs.mkdirSync(lock);
+        fs.mkdirSync(queueLock);
         const harness = path.join(root, 'harness.sh');
         // Each subshell sets the exit trap itself, as a forked subshell holds it before bash
         // resets it, then sends itself SIGTERM through a child (`sh -c 'kill -TERM $PPID'`).
@@ -85,10 +91,12 @@ describe('the memory worker writes one Run line per run', () => {
           'log() { echo "LOG $*"; }',
           'RUN_CLI="unknown"; RUN_ARGV="none"; RUN_RESULT="skip"; RUN_DENIALS="n/a"; RUN_REMOVED="none"; RUN_FLOOR=""',
           'RESULT_FILE=""',
+          'source "$1"',
           `LOCK_DIR='${lock}'`,
-          'LOCK_HELD="true"',
+          `QUEUE_LOCK_DIR='${queueLock}'`,
+          'LOCK_HELD="true"; QUEUE_LOCK_HELD="true"',
           transform(trapCode()),
-          'state() { if [ -d "$LOCK_DIR" ]; then echo "$1: lock held"; else echo "$1: lock released"; fi; }',
+          'state() { if [ -d "$LOCK_DIR" ] && [ -d "$QUEUE_LOCK_DIR" ]; then echo "$1: locks held"; else echo "$1: a lock released"; fi; }',
           '( trap finish_run EXIT; exit 0 )',
           'state "a plain subshell"',
           `( ${subshell} ) &`,
@@ -102,12 +110,12 @@ describe('the memory worker writes one Run line per run', () => {
           '',
         ].join('\n'));
 
-        const result = spawnSync('bash', [harness], { encoding: 'utf-8', timeout: 60000 });
+        const result = spawnSync('bash', [harness, path.join(path.dirname(WORKER), 'curation-lock')], { encoding: 'utf-8', timeout: 60000 });
         return {
           status: result.status,
           stderr: result.stderr,
           lines: result.stdout.trim().split('\n'),
-          lockLeft: fs.existsSync(lock),
+          locksLeft: [lock, queueLock].filter(file => fs.existsSync(file)),
         };
       } finally {
         fs.rmSync(root, { recursive: true, force: true });
@@ -115,17 +123,17 @@ describe('the memory worker writes one Run line per run', () => {
     }
 
     const EXPECTED = [
-      'a plain subshell: lock held',
-      'a background subshell that a signal ends: lock held',
-      'a background subshell in its own group that a signal ends: lock held',
+      'a plain subshell: locks held',
+      'a background subshell that a signal ends: locks held',
+      'a background subshell in its own group that a signal ends: locks held',
       'LOG Run: cli=unknown argv=none result=skip denials=n/a removed=none',
     ];
 
-    it('writes the Run line and releases the lock only in the worker, not in a subshell that a signal ends', () => {
+    it('writes the Run line and releases the locks only in the worker, not in a subshell that a signal ends', () => {
       const run = runHarness([], trap => trap);
       expect(run.status, `the harness ended cleanly: ${run.stderr}`).toBe(0);
       expect(run.lines).toEqual(EXPECTED);
-      expect(run.lockLeft, 'the worker itself released the lock when it ended').toBe(false);
+      expect(run.locksLeft, 'the worker itself released both locks when it ended').toEqual([]);
     });
 
     it('keeps that rule when the read of the real PID fails: a subshell writes no line, the worker writes one', () => {
@@ -138,7 +146,7 @@ describe('the memory worker writes one Run line per run', () => {
       });
       expect(run.status, `the harness ended cleanly: ${run.stderr}`).toBe(0);
       expect(run.lines).toEqual(EXPECTED);
-      expect(run.lockLeft, 'the worker itself released the lock when it ended').toBe(false);
+      expect(run.locksLeft, 'the worker itself released both locks when it ended').toEqual([]);
     });
   });
 
@@ -146,7 +154,8 @@ describe('the memory worker writes one Run line per run', () => {
    * One worker run in a fresh project, home and fake claude; resolves to the Run lines it
    * wrote, each without its timestamp and hook name.
    */
-  async function runOnce(withFolderAtStagedPath: boolean): Promise<string[]> {
+  const priorNote = '## Now\nPrevious note\n## Progress\n';
+  async function runOnce(withFolderAtStagedPath: boolean, body = '## Now', failLineCount = false) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'emr-runline-'));
     try {
       const project = path.join(root, 'project');
@@ -157,34 +166,39 @@ describe('the memory worker writes one Run line per run', () => {
       fs.mkdirSync(memory, { recursive: true });
       fs.mkdirSync(home);
       fs.mkdirSync(shim);
+      const note = path.join(memory, 'WORKING-MEMORY.md');
+      const fixture = path.join(root, 'model-note');
+      fs.writeFileSync(note, priorNote);
+      fs.writeFileSync(fixture, `<!-- memory-head: (set by devflow) -->\n${body}\n`);
+      if (failLineCount) {
+        writeFakeExecutable(path.join(shim, 'wc'), '#!/bin/bash\nif [ "$1" = -l ]; then exit 1; fi\nexec /usr/bin/wc "$@"\n');
+      }
       const ts = Math.floor(Date.now() / 1000);
       fs.writeFileSync(
         path.join(memory, '.pending-turns.jsonl'),
-        `${JSON.stringify({ role: 'user', content: 'a', ts })}\n${JSON.stringify({ role: 'assistant', content: 'b', ts: ts + 1 })}\n`,
+        JSON.stringify({ role: 'assistant', content: 'b', ts }),
       );
       if (withFolderAtStagedPath) {
         fs.mkdirSync(path.join(staged, 'a', 'b'), { recursive: true });
         fs.writeFileSync(path.join(staged, 'inside'), 'x');
       }
-      fs.writeFileSync(
+      writeFakeExecutable(
         path.join(shim, 'claude'),
         [
           '#!/bin/bash',
           'if [ "${1:-}" = "--version" ]; then echo "2.1.293 (Claude Code)"; exit 0; fi',
           'cat >/dev/null',
-          `echo '<!-- memory-head: testsha branch: main -->' > '${staged}'`,
-          `echo '## Now' >> '${staged}'`,
+          'cp "$MODEL_NOTE" "$STAGED_NOTE" || exit 1',
           'exit 0',
           '',
         ].join('\n'),
-        { mode: 0o755 },
       );
       const runPath = `${shim}:${process.env.PATH ?? '/usr/bin:/bin'}`;
       expect(resolveOnPath('claude', runPath), 'the fake claude resolves first on PATH').toBe(path.join(shim, 'claude'));
 
       await new Promise<void>((resolve, reject) => {
         const child = spawn('bash', [WORKER, project], {
-          env: { ...process.env, HOME: home, PATH: runPath },
+          env: { ...isolatedEnv(process.env, home), PATH: runPath, MODEL_NOTE: fixture, STAGED_NOTE: staged },
           stdio: 'ignore',
         });
         child.on('error', reject);
@@ -192,14 +206,31 @@ describe('the memory worker writes one Run line per run', () => {
       });
 
       const logs = path.join(home, '.devflow', 'logs');
-      return fs.readdirSync(logs)
+      const lines = fs.readdirSync(logs)
         .flatMap(slug =>
           fs.readFileSync(path.join(logs, slug, '.background-memory-update.log'), 'utf-8').split('\n'))
         .flatMap(line => (/^\[[^\]]*\] \[[^\]]*\] (Run: .*)$/.exec(line) ?? []).slice(1));
+      return { lines, note: fs.readFileSync(note, 'utf8'), batchKept: fs.existsSync(path.join(memory, '.pending-turns.processing')) };
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
   }
+
+  it.each(['## Extra', '## Now\nText\0tail'])('keeps the readable note and batch for invalid note text', async (body) => {
+    expect(await runOnce(false, body)).toEqual({
+      lines: ['Run: cli=2.1.293 argv=lean result=failed denials=unknown removed=none'],
+      note: priorNote,
+      batchKept: true,
+    });
+  }, RUN_BUDGET);
+
+  it('keeps the batch and skips the model when it cannot count the rows', async () => {
+    expect(await runOnce(false, '## Now', true)).toEqual({
+      lines: ['Run: cli=2.1.293 argv=none result=skip denials=n/a removed=none'],
+      note: priorNote,
+      batchKept: true,
+    });
+  }, RUN_BUDGET);
 
   it.skipIf(!STRESS)('writes the expected single Run line in each of many workers that run at once', async () => {
     const total = 64;
@@ -212,7 +243,7 @@ describe('the memory worker writes one Run line per run', () => {
         const i = next++;
         const withFolder = i % 2 === 0;
         try {
-          const lines = await runOnce(withFolder);
+          const { lines } = await runOnce(withFolder);
           const expected = `Run: cli=2.1.293 argv=lean result=updated denials=unknown removed=${withFolder ? 'dir' : 'none'}`;
           if (lines.length !== 1 || lines[0] !== expected) {
             wrong.push(`run ${i}: ${lines.length} Run lines, expected one "${expected}":\n${lines.join('\n')}`);

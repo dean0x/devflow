@@ -94,6 +94,7 @@ export function workingMemoryNote(): string {
     'where you left off.\n\n' +
     'Runs a background agent on session stop that consumes additional\n' +
     'tokens. Consider skipping if token usage is a concern.\n' +
+    'Note limit: 8 KB (8,192 bytes). Use one worktree for each parallel session.\n' +
     `Needs Claude Code ${MEMORY_MIN_PERMISSION_VERSION} or newer.\n` +
     'Applies to every project.'
   );

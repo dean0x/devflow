@@ -18,7 +18,7 @@ Use `--recommended` or `--advanced` flags for non-interactive setup.
 |--------|-------------|
 | `--plugin <names>` | Comma-separated plugin names (e.g., `implement,code-review`) |
 | `--ambient` / `--no-ambient` | Enable/disable ambient mode — orchestrator charter + per-prompt reminder (default: on) |
-| `--memory` / `--no-memory` | Enable/disable working memory (default: on) |
+| `--memory` / `--no-memory` | Turn working memory on or off (default for new installs: off) |
 | `--curation` / `--no-curation` | Enable/disable curation (default: on); with curation off, init installs the curation-off prompts and not `devflow:apply-decisions` |
 | `--knowledge` / `--no-knowledge` | Enable/disable feature knowledge (default: on) |
 | `--rules` / `--no-rules` | Enable/disable rules (default: on) |
@@ -31,7 +31,7 @@ Use `--recommended` or `--advanced` flags for non-interactive setup.
 | `--hud-only` | Install only the HUD (no plugins, hooks, or extras) |
 | `--recommended` | Apply recommended defaults after plugin selection (skip advanced prompts) |
 | `--advanced` | Show all configuration prompts |
-| `--reset` | Factory reset — restore all defaults, ignoring prior installation state; mutually exclusive with `--plugin` |
+| `--reset` | Restore factory defaults, including working memory off. You can set `--memory` to turn it on. Do not combine `--reset` with `--plugin`. |
 | `--security <user\|managed\|none>` | Security deny list location (default: user) |
 | `--verbose` | Show detailed output |
 
@@ -139,6 +139,11 @@ The move skips a project, and changes nothing in it, when git tracks any entry u
 When git tracks a file in a curation data folder at the ledger root (the curation folder, the old ledger folder or a backup folder), or a `.git` entry stands and git does not answer, curation is paused for the project, and these commands read and write nothing there. `--status` prints the machine state line, then the fixed pause notice, and exits 0. `--list`, `--show`, `--restore`, `--reset`, `--clear` and `--configure` (project scope) print the notice as an error, change nothing and exit 1. They ask before they read a ledger file, take a lock or ask you to confirm. `--enable` and `--disable` are not refused: `--disable` records the switch and deletes no queue file. The notice holds nothing from the repository. When git tracks files, it says to run `git ls-files .devflow`, then `git rm --cached <file>` for the files that git lists, in the main checkout, and to delete them if you did not make them. When git did not answer, it says that the check runs again at the next session start, and that you should check that git runs in the project if the notice stays. The pause ends when the files are untracked: the next command or session start asks git again.
 
 ## Working Memory
+
+Working memory is off by default on new installs. A standard re-init keeps your choice.
+`devflow init --reset` restores the off default.
+The note has a limit of 8 KB (8,192 bytes). Use one worktree for each parallel session.
+See [Working Memory](working-memory.md) for the note format and restore rules.
 
 ```bash
 npx devflow-kit memory --enable           # Enable working memory in every project (a repository can opt out)
@@ -382,18 +387,28 @@ npx devflow-kit hud --enable         # Enable HUD
 npx devflow-kit hud --disable        # Disable HUD
 npx devflow-kit hud --detail         # Show tool/agent descriptions
 npx devflow-kit hud --no-detail      # Hide tool/agent descriptions
+npx devflow-kit hud --forecast       # Show the Claude week forecast
+npx devflow-kit hud --no-forecast    # Hide the Claude week forecast
 ```
+
+`--status` reports the forecast choice. It applies no changes, even with other flags. You can combine a detail flag and a forecast flag with `--enable` or `--disable`.
+
+**Claude week forecast.** The forecast is off by default. Devflow saves your choice in the `forecast` field of `~/.devflow/hud.json`. `devflow init` keeps your choice. When the HUD and forecast are on, the `weekForecast` component shows estimated quota use at reset in dim text after `7d`. If the rounded estimate exceeds 999%, the HUD shows `>999%`. If the quota will run out by reset, the HUD also shows how long it will last. At 100% used, the HUD omits the countdown.
+
+The HUD uses the same formula as the tokenmeter forecast, but it needs no tokenmeter data. The forecast starts no process and reads no extra file. The HUD uses `rate_limits.seven_day` from the current Claude Code session's JSON on stdin. It treats the value as current at each update.
+
+The forecast needs a quota value from 0% to 100% and a future reset time in epoch seconds. The reset must be no more than eight days away. If `rate_limits` is absent or the week data is absent or invalid, the HUD omits only the forecast. The HUD also omits it for about the first five hours of the quota week.
 
 The HUD shows the weekly Codex quota next to the Claude quota. It also shows the 5-hour Codex quota if your plan has one. When the HUD cache expires, devflow runs `tokenmeter hud` from the path that `devflow init` saves. The cache usually lasts 30 seconds. For readings at least 60 seconds old but less than 10 minutes old, the cache lasts at most 5 seconds.
 
 The command returns the latest saved data. It does not wait for Codex. A refresh is due at 60 seconds. tokenmeter checks recent Codex session logs in the background. It uses the newest data from the logs or the app server.
 
-By default, tokenmeter can start `codex app-server` at most about once per minute per data folder. Codex can then use its stored sign-in to request the limits from OpenAI over HTTP.
+By default, tokenmeter can start `codex app-server` at most about once per minute per data folder. Codex can then use its stored sign-in to request the limits and the account token usage from OpenAI over HTTP.
 
-To stop the app server and keep the log source, run:
+To stop the app server and the account usage request, and keep the log source, run:
 
 ```bash
-npx @dean0x/tokenmeter@0.2.0 config app_server off
+npx @dean0x/tokenmeter@0.3.0 config app_server off
 ```
 
 A window past its reset time shows `reset`. A reading at least 10 minutes old shows its age, for example `· data 10m old`. If tokenmeter cannot find Codex on `PATH`, log data at least 10 minutes old does not show. If neither source has data, the HUD omits the Codex segment. The Claude quota stays visible when available.

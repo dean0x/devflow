@@ -1,8 +1,8 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { GatherContext, GitStatus, TranscriptData } from '../src/hud/types.js';
+import type { GatherContext, GitStatus, StdinData, TranscriptData } from '../src/hud/types.js';
 import { hudCacheDir, writeCache } from '../src/core/cache.js';
 
 // Import components
@@ -14,6 +14,7 @@ import model from '../src/hud/components/model.js';
 import contextUsage from '../src/hud/components/context-usage.js';
 import sessionDuration from '../src/hud/components/session-duration.js';
 import usageQuota, { formatCountdown } from '../src/hud/components/usage-quota.js';
+import weekForecast, { forecastPercentText, parseWeekPoint, weekForecastFrom } from '../src/hud/components/week-forecast.js';
 import codexQuota from '../src/hud/components/codex-quota.js';
 import todoProgress from '../src/hud/components/todo-progress.js';
 import sessionCost from '../src/hud/components/session-cost.js';
@@ -21,7 +22,7 @@ import releaseInfo from '../src/hud/components/release-info.js';
 import worktreeCount from '../src/hud/components/worktree-count.js';
 import configCounts from '../src/hud/components/config-counts.js';
 import versionBadge from '../src/hud/components/version-badge.js';
-import { stripAnsi } from '../src/hud/colors.js';
+import { dim, stripAnsi } from '../src/hud/colors.js';
 
 function makeCtx(overrides: Partial<GatherContext> = {}): GatherContext {
   return {
@@ -31,9 +32,9 @@ function makeCtx(overrides: Partial<GatherContext> = {}): GatherContext {
     usage: null,
     codexUsage: null,
     configCounts: null,
-    decisionsCounts: null,
+    curationCounts: null,
     costHistory: null,
-    config: { enabled: true, detail: false, components: [] },
+    config: { enabled: true, detail: false, forecast: false, components: [] },
     devflowDir: '/test/.devflow',
     sessionStartTime: null,
     terminalWidth: 120,
@@ -471,6 +472,93 @@ describe('usageQuota component', () => {
     const result = await usageQuota(ctx);
     expect(result).not.toBeNull();
     expect(result!.raw).not.toContain('(');
+  });
+});
+
+describe('weekForecast component', () => {
+  const nowMs = Date.parse('2026-11-23T12:00:00Z');
+  const hourMs = 3_600_000;
+  const resetIn = (hours: number) => (nowMs + hours * hourMs) / 1000;
+  const week = (usedPercentage: unknown, resetsAt: unknown = resetIn(84)) => ({
+    rate_limits: { seven_day: { used_percentage: usedPercentage, resets_at: resetsAt } },
+  });
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(nowMs);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  function renderForecast(stdin: unknown) {
+    return weekForecast(makeCtx({ stdin: stdin as StdinData }));
+  }
+
+  it.each([
+    [40, 84, '→ 80% by reset'],
+    [80, 82, '→ 156% by reset, runs out in 21h 30m'],
+    [70, 84, '→ 140% by reset, runs out in 1d 12h'],
+    [50, 84, '→ 100% by reset, runs out in 3d 12h'],
+    // The estimate reaches 100% less than half a millisecond after reset.
+    [49.99999998, 84, '→ 100% by reset'],
+    [99, 162, '→ >999% by reset, runs out in 3m'],
+    [100, 84, '→ 200% by reset'],
+    [0, 84, '→ 0% by reset'],
+    [99.99, 84, '→ 200% by reset, runs out in 0m'],
+  ] as const)('shows dim text for %s%% used and %s hours left', async (percent, hours, expected) => {
+    expect(await renderForecast(week(percent, resetIn(hours)))).toEqual({
+      text: dim(expected),
+      raw: expected,
+    });
+  });
+
+  it.each([
+    ['no rate_limits', {}],
+    ['no seven_day', { rate_limits: {} }],
+    ['a null seven_day', { rate_limits: { seven_day: null } }],
+    ['a string seven_day', { rate_limits: { seven_day: '40' } }],
+    ['an array seven_day', { rate_limits: { seven_day: [] } }],
+    ['a string percent', week('40')],
+    ['NaN percent', week(NaN)],
+    ['infinite percent', week(Infinity)],
+    ['negative percent', week(-1)],
+    ['percent above 100', week(101)],
+    ['no reset', { rate_limits: { seven_day: { used_percentage: 40 } } }],
+    ['a string reset', week(40, String(resetIn(84)))],
+    ['an infinite reset', week(40, Infinity)],
+    ['a reset at now', week(40, resetIn(0))],
+    ['a past reset', week(40, resetIn(-1))],
+    ['a reset more than 8 days away', week(40, resetIn(8 * 24) + 1)],
+    ['a reset in milliseconds', week(40, resetIn(84) * 1000)],
+    ['only 5 hours elapsed', week(40, resetIn(163))],
+  ] as const)('shows nothing with %s', async (_label, stdin) => {
+    expect(await renderForecast(stdin)).toBeNull();
+  });
+
+  it.each([
+    [999.49, '999%'],
+    [999.5, '>999%'],
+  ] as const)('formats a forecast of %s as %s', (percent, text) => {
+    expect(forecastPercentText(percent)).toBe(text);
+  });
+
+  it('returns no forecast for a past reset without the parser', () => {
+    expect(weekForecastFrom({ usedPercent: 40, resetsAtMs: nowMs - 1000 }, nowMs)).toBeNull();
+  });
+
+  it('accepts a reset exactly 8 days away but not one second later', () => {
+    const reset = resetIn(8 * 24);
+    const accepted = parseWeekPoint(week(40, reset).rate_limits.seven_day, nowMs);
+    const refused = parseWeekPoint(week(40, reset + 1).rate_limits.seven_day, nowMs);
+    expect([accepted, refused]).toEqual([{ usedPercent: 40, resetsAtMs: reset * 1000 }, null]);
+  });
+
+  it('starts the forecast at exactly 5 hours and 144 seconds elapsed', async () => {
+    const reset = resetIn(163) - 144;
+    vi.setSystemTime(nowMs - 1);
+    const before = await renderForecast(week(1, reset));
+    vi.setSystemTime(nowMs);
+    const at = await renderForecast(week(1, reset));
+    expect([before, at]).toEqual([null, { text: dim('→ 33% by reset'), raw: '→ 33% by reset' }]);
   });
 });
 

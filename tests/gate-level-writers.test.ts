@@ -104,6 +104,7 @@ const WRITERS: ReadonlyArray<{ name: string; args: readonly string[] }> = [
   { name: 'init --hud-only', args: ['init', '--hud-only'] },
   { name: 'tracker --set', args: ['tracker', '--set', 'jira'] },
   { name: 'hud --enable', args: ['hud', '--enable'] },
+  { name: 'memory --enable', args: ['memory', '--enable'] },
   { name: 'memory --disable', args: ['memory', '--disable'] },
   { name: 'ambient --disable', args: ['ambient', '--disable'] },
   { name: 'compliance --enable', args: ['compliance', '--enable'] },

@@ -10,17 +10,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Experimental Code Mode flag.** Use `devflow flags --enable code-mode` for direct Claude Code sessions. The flag is off by default. This change applies to new sessions only. Code Mode does not start while the Devflow proxy or `disable-nonessential-traffic` is on. `devflow flags` does not change a user `settings.json` that is over 1 MiB or is not valid UTF-8, and leaves the file as it is.
+- The HUD can show a Claude week quota forecast from the current session's data. The forecast is off by default and needs no tokenmeter data. Run `devflow hud --forecast` to turn it on. Run `devflow hud --no-forecast` to turn it off. Devflow saves your choice in the `forecast` field of `~/.devflow/hud.json`. When the HUD and the forecast are on, the HUD adds the `weekForecast` component.
+- **Parallel sessions.** Working memory pairs turns within each session. If two sessions write the same note, in one batch or in separate batches, the note header flags the shared note for four hours. Use one worktree for each parallel session.
+
+### Changed
+
+- **Working memory is off by default.** Existing installs keep their choice. Use `devflow memory --enable` to turn it on. `devflow init --reset` restores the off default.
+- **Short memory note.** The note has a limit of 8 KB (8,192 bytes) and has two sections: `## Now` and `## Progress`. Session start skips notes above the limit. The worker prompt keeps each data block separate.
+
+### Fixed
+
+- The GitHub issue fetch finds the acceptance criteria under a `##`, `###` or `####` heading. The section ends at the next heading of the same level or a higher level (#808).
+- The `hud` command applies detail and forecast changes if you also give `--enable` or `--disable`.
+
+---
+
+## [3.20.0] - 2026-11-23
+
+### Added
+
 - A local test plan can specify ` [expect-exit: <k>]` (1 to 125) for a planned failure. A local PASS needs the expected exit, which defaults to 0. A file claim applies only if its saved expected exit matches the test plan. Old claim lines without `expect-exit:` parse with expected exit 0 and apply only to TPs without clauses; with clauses, they give UNVERIFIED, not FAILED.
 
 ### Changed
 
-- **The HUD uses tokenmeter for Codex quota.** tokenmeter checks recent session logs in the background. By default, tokenmeter can start `codex app-server` at most about once per minute per data folder. Codex can then use its stored sign-in to request the limits from OpenAI over HTTP. To stop the app server and keep the log source, run `npx @dean0x/tokenmeter@0.2.0 config app_server off`.
+- **The HUD uses tokenmeter for Codex quota.** tokenmeter checks recent session logs in the background. By default, tokenmeter can start `codex app-server` at most about once per minute per data folder. Codex can then use its stored sign-in to request the limits and the account token usage from OpenAI over HTTP. To stop the app server and the account usage request, and keep the log source, run `npx @dean0x/tokenmeter@0.3.0 config app_server off`.
 
   The HUD shows the data age from 10 minutes. If tokenmeter cannot find Codex, log data at least 10 minutes old does not show.
+
+- **Routing runtime pinned to `0.9.0`** — before: `0.8.0`. With this runtime, the Devflow proxy uses the separate-session start on macOS and Linux. The Devflow proxy model catalog does not change.
+
+- **Releases publish from a version tag.** A release PR sets the version and the CHANGELOG. A `vX.Y.Z` tag push on main then publishes `devflow-kit` to npm through npm trusted publishing, with provenance, and creates the GitHub release. `scripts/bump-version.ts` now also adds a new empty `[Unreleased]` section.
 
 ### Removed
 
 - The Devflow proxy quota snapshot reader in the HUD.
+
+### Fixed
+
+- On macOS and Linux, compatible relays start in a separate session and stay active after Devflow exits. Older relays use the previous start method. `devflow proxy --enable` reports a failure if the launcher does not respond within 12 seconds.
 
 ### Upgrade notes
 
@@ -2595,6 +2622,7 @@ devflow init
 ---
 
 [Unreleased]: https://github.com/dean0x/devflow/compare/v3.8.0...HEAD
+[3.20.0]: https://github.com/dean0x/devflow/compare/v3.19.3...v3.20.0
 [3.19.3]: https://github.com/dean0x/devflow/compare/v3.19.2...v3.19.3
 [3.19.2]: https://github.com/dean0x/devflow/compare/v3.19.1...v3.19.2
 [3.19.1]: https://github.com/dean0x/devflow/compare/v3.19.0...v3.19.1

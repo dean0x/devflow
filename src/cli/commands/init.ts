@@ -1079,7 +1079,7 @@ export const initCommand = new Command('init')
     if (options.hudOnly) {
       // Save HUD config
       const existingHud = loadHudConfig();
-      saveHudConfig({ enabled: true, detail: existingHud.detail });
+      saveHudConfig({ ...existingHud, enabled: true });
 
       // Update statusLine in settings.json
       const settingsPath = path.join(claudeDir, 'settings.json');
@@ -1657,7 +1657,7 @@ export const initCommand = new Command('init')
       const complianceSummary = formatComplianceSummary(complianceEnabled, complianceFrameworks);
       const summaryLines = [
         `Ambient mode:    ${ambientEnabled ? 'enabled' : 'disabled'}`,
-        `Working memory:  ${memoryEnabled ? 'enabled' : 'disabled'}`,
+        `Working memory:  ${memoryEnabled ? 'enabled' : 'disabled (turn on: devflow memory --enable)'}`,
         `Curation:        ${curationEnabled ? 'enabled' : 'disabled'}`,
         `Rules:           ${rulesEnabled ? 'enabled' : 'disabled'}`,
         `HUD:             ${hudEnabled ? 'enabled' : 'disabled'}`,
@@ -1720,7 +1720,7 @@ export const initCommand = new Command('init')
       } else {
         p.note(workingMemoryNote(), 'Working Memory');
         const memoryChoice = await p.confirm({
-          message: 'Enable working memory? (Recommended)',
+          message: 'Enable working memory?',
           initialValue: seed.features.memory,
         });
         if (p.isCancel(memoryChoice)) {
@@ -2670,7 +2670,7 @@ export const initCommand = new Command('init')
 
     // Configure HUD
     const existingHud = loadHudConfig();
-    saveHudConfig({ enabled: hudEnabled, detail: existingHud.detail });
+    saveHudConfig({ ...existingHud, enabled: hudEnabled });
 
     // File extras — into the projects the Recommended summary's .claudeignore row checked.
     if (claudeignoreEnabled) {
