@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [3.21.0] - 2026-11-24
+
 ### Added
 
 - **Experimental Code Mode flag.** Use `devflow flags --enable code-mode` for direct Claude Code sessions. The flag is off by default. This change applies to new sessions only. Code Mode does not start while the Devflow proxy or `disable-nonessential-traffic` is on. `devflow flags` does not change a user `settings.json` that is over 1 MiB or is not valid UTF-8, and leaves the file as it is.
@@ -2621,7 +2625,8 @@ devflow init
 
 ---
 
-[Unreleased]: https://github.com/dean0x/devflow/compare/v3.8.0...HEAD
+[Unreleased]: https://github.com/dean0x/devflow/compare/v3.21.0...HEAD
+[3.21.0]: https://github.com/dean0x/devflow/compare/v3.20.0...v3.21.0
 [3.20.0]: https://github.com/dean0x/devflow/compare/v3.19.3...v3.20.0
 [3.19.3]: https://github.com/dean0x/devflow/compare/v3.19.2...v3.19.3
 [3.19.2]: https://github.com/dean0x/devflow/compare/v3.19.1...v3.19.2
