@@ -24,7 +24,8 @@ devflow/
 │   │   ├── paths.ts                  # getPackageRoot + asset path helpers
 │   │   ├── assets.ts                 # skillsDir, agentsDir, rulesDir, scriptsDir, commandsDir,
 │   │   │                             #   compiledAgentsDir, agentSourceDirs (dist-first order owner)
-│   │   ├── flags.ts                  # Claude Code flag registry (32 flags)
+│   │   ├── flags.ts                  # Claude Code flag registry (33 flags)
+│   │   ├── code-mode.ts              # Code Mode checks, warnings, and refusal messages
 │   │   ├── fs-atomic.ts              # Atomic write helper (D34)
 │   │   ├── claude-md-audit.ts        # Typed seam onto scripts/claude-md-audit.cjs: roots, the one init note, the stamp write (lstat-checked)
 │   │   ├── manifest.ts               # Manifest read/write

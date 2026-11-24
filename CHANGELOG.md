@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Experimental Code Mode flag.** Use `devflow flags --enable code-mode` for direct Claude Code sessions. The flag is off by default. This change applies to new sessions only. Code Mode does not start while the Devflow proxy or `disable-nonessential-traffic` is on. `devflow flags` does not change a user `settings.json` that is over 1 MiB or is not valid UTF-8, and leaves the file as it is.
 - The HUD can show a Claude week quota forecast from the current session's data. The forecast is off by default and needs no tokenmeter data. Run `devflow hud --forecast` to turn it on. Run `devflow hud --no-forecast` to turn it off. Devflow saves your choice in the `forecast` field of `~/.devflow/hud.json`. When the HUD and the forecast are on, the HUD adds the `weekForecast` component.
 - **Parallel sessions.** Working memory pairs turns within each session. If two sessions write the same note, in one batch or in separate batches, the note header flags the shared note for four hours. Use one worktree for each parallel session.
 

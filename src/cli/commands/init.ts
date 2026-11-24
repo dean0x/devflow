@@ -57,6 +57,7 @@ import { addHudStatusLine, removeHudStatusLine } from './hud.js';
 import { loadConfig as loadHudConfig, saveConfig as saveHudConfig } from '../../hud/config.js';
 import { readManifest, writeManifest, resolvePluginList, detectUpgrade, type ManifestData, type UpgradeInfo } from '../../core/manifest.js';
 import { convergeFlagsIntoSettings, countActiveFlags, readViewMode, type FlagsRecord } from '../../core/flags.js';
+import { initCodeModeWarnings } from '../../core/code-mode.js';
 import { addContextHook, removeContextHook, hasContextHook } from './context.js';
 import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
 import { writeManagedConfig, readConfigIfPresent, DEFAULT_CONFIG, type FeatureConfig, type ManagedConfigWriteError } from '../../core/feature-config.js';
@@ -985,6 +986,10 @@ export function formatManagedConfigWriteError(error: ManagedConfigWriteError): s
  */
 async function discoverRepoRoots(claudeDir: string, homeDir: string): Promise<string[]> {
   return withoutHomeRoots(await discoverProjectGitRoots(claudeDir), homeDir);
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 export const initCommand = new Command('init')
@@ -2601,6 +2606,11 @@ export const initCommand = new Command('init')
       // Parse Settings once for the hook mutation; env mutation stays in string space.
       {
         const parsedSettings = JSON.parse(content) as Settings;
+        const env = isJsonObject(parsedSettings.env) ? parsedSettings.env : undefined;
+        /** D-CODE-MODE-INIT-WARN: Use the converged flags and the proxy state after preflight. */
+        const warnings = initCodeModeWarnings({ proxyEnabled, record: enabledFlags, env });
+        for (const warning of warnings) p.log.warn(warning);
+
         removeProxyHooks(parsedSettings);
         if (proxyEnabled) addProxyHooks(parsedSettings, devflowDir);
         content = JSON.stringify(parsedSettings, null, 2) + '\n';

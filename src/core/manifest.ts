@@ -252,10 +252,11 @@ export function hasRequiredManifestFields(data: Record<string, unknown>): boolea
  * write, because the next read heals. Under the lock it reads the file again and
  * writes only when those bytes are the bytes it parsed, so a toggle that landed after
  * the parse is never written over with the older snapshot.
+ * Pass `heal: false` to normalize in memory without a write.
  */
 export async function readManifest(
   devflowDir: string,
-  opts?: { readonly onWarning?: (message: string) => void },
+  opts?: { readonly onWarning?: (message: string) => void; readonly heal?: boolean },
 ): Promise<ManifestData | null> {
   const manifestPath = path.join(devflowDir, 'manifest.json');
   try {
@@ -376,7 +377,7 @@ export async function readManifest(
       ...(Object.hasOwn(data, 'installedVariants') ? { installedVariants: data.installedVariants } : {}),
     };
 
-    if (needsHeal) {
+    if (needsHeal && opts?.heal !== false) {
       // D39: wrap the heal-write in its own try/catch so a write failure does NOT
       // propagate to the caller. The migrated in-memory manifest is returned even
       // when the on-disk heal fails. The next read will retry the heal.

@@ -329,6 +329,30 @@ export const FENCE_ROWS: readonly FenceRow[] = [
   { args: ['flags', '--unset', 'max-concurrent-subagents'], allow: [SETTINGS, MANIFEST], mustWrite: true },
   { args: ['flags', '--status'], allow: NONE, mustWrite: false },
   { args: ['flags', '--list'], allow: NONE, mustWrite: false },
+  {
+    args: ['flags', '--enable', 'code-mode'], allow: NONE, mustWrite: false, exitCode: 1,
+    seed: sb => writeFileSync(path.join(sb.home, '.devflow', 'proxy.json'), '{"enabled":true}\n'),
+  },
+  {
+    args: ['proxy', '--enable'], allow: NONE, mustWrite: false, exitCode: 1,
+    seed: sb => {
+      writeFileSync(path.join(sb.home, '.devflow', 'proxy.json'), '{"enabled":false}\n')
+      rewriteHomeJson(sb, '.devflow/manifest.json', manifest => {
+        ((manifest.features as Record<string, unknown>).flags as Record<string, unknown>)['code-mode'] = true
+      })
+    },
+  },
+  {
+    args: ['flags', '--disable', 'code-mode'], allow: [SETTINGS, MANIFEST], mustWrite: true,
+    seed: sb => {
+      rewriteHomeJson(sb, '.claude/settings.json', settings => {
+        (settings.env as Record<string, unknown>).CLAUDE_CODE_EXPERIMENTAL_CODE_MODE = '1'
+      })
+      rewriteHomeJson(sb, '.devflow/manifest.json', manifest => {
+        ((manifest.features as Record<string, unknown>).flags as Record<string, unknown>)['code-mode'] = true
+      })
+    },
+  },
 
   { args: ['debug', '--enable'], allow: [SETTINGS], mustWrite: true },
   { args: ['debug', '--disable'], allow: [SETTINGS], mustWrite: true },
@@ -366,14 +390,14 @@ export const UNFENCED_COMMANDS: Readonly<Record<string, string>> = {
   uninstall: 'its keep list and removals are the install-snapshot golden\'s uninstall sections (TP-6)',
 }
 
-/** Toggle actions a command defines that have no row, each with the reason. */
+/** Toggle paths without a fence row, each with the reason. */
 export const UNFENCED_ACTIONS: Readonly<Record<string, string>> = {
   'security --disable':
     'after stripping the user settings it removes every Devflow deny entry from the platform managed-settings file ' +
     '(getManagedSettingsPath: /Library/Application Support/ClaudeCode or /etc/claude-code), an absolute system path ' +
     'with no seam the sandbox can redirect; on a machine whose managed file carries the deny list, a run would strip ' +
     'that machine\'s protection (or prompt for sudo), and the walk could not see the write anyway',
-  'proxy --enable': 'starts the relay process, whose writes outlive the command',
+  'proxy --enable': 'on success it starts the relay process, whose writes outlive the command; the Code Mode refusal has a row',
   'proxy --disable': 'stops the relay process started by --enable',
   'safe-delete --enable': 'writes the shell profile only when the platform trash tool is on PATH, a machine fact the table cannot pin',
   'safe-delete --disable': 'removes what --enable wrote',

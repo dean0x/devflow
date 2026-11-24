@@ -28,7 +28,11 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs, readdirSync, readFileSync, lstatSync } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { spawnSync, execFileSync } from 'child_process';
+import { spawnSync, execFile, execFileSync } from 'child_process';
+import { once } from 'node:events';
+import { createServer } from 'node:http';
+import { promisify } from 'node:util';
+import { CODE_MODE_PROXY_BLOCKER, CODE_MODE_TRAFFIC_BLOCKER } from '../src/core/code-mode.js';
 import { type ManifestData } from '../src/core/manifest.js';
 import { resolveRetiredScopeOption } from '../src/cli/commands/init.js';
 import { requireBuiltCli, sandboxEnv } from './helpers.js';
@@ -37,6 +41,7 @@ import { requireBuiltCli, sandboxEnv } from './helpers.js';
 
 const CLI_PATH = requireBuiltCli();
 const SUBPROCESS_TIMEOUT_MS = 60_000;
+const MINIMAL_INIT = ['init', '--recommended', '--no-ambient', '--no-memory', '--no-curation', '--no-knowledge', '--no-rules'];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -44,19 +49,12 @@ const SUBPROCESS_TIMEOUT_MS = 60_000;
 function runInit(tmpHome: string, extraArgs: string[] = []): { status: number | null; stdout: string; stderr: string } {
   const result = spawnSync(
     process.execPath,
-    [CLI_PATH, 'init', '--recommended', '--no-ambient', '--no-memory', '--no-curation', '--no-knowledge', '--no-rules', ...extraArgs],
+    [CLI_PATH, ...MINIMAL_INIT, ...extraArgs],
     {
       cwd: os.tmpdir(), // non-git dir → earlyGitRoot=null → no project discovery
       encoding: 'utf-8',
       timeout: SUBPROCESS_TIMEOUT_MS,
-      env: {
-        ...process.env,
-        HOME: tmpHome,
-        // Suppress memory worker spawn (no real claude binary in test env)
-        DEVFLOW_HOOK_DEBUG: undefined,
-        // Ensure non-interactive mode
-        FORCE_COLOR: '0',
-      },
+      env: sandboxEnv(tmpHome),
     },
   );
   if (result.error) throw result.error;
@@ -711,6 +709,108 @@ describe('init e2e — subagent-cache-5m (D-SUBAGENT-CACHE-5M, D-ADOPT-RESPECTS-
   }, SUBPROCESS_TIMEOUT_MS);
 });
 
+describe('init e2e — Code Mode convergence and warnings', () => {
+  const codeModeKey = 'CLAUDE_CODE_EXPERIMENTAL_CODE_MODE';
+  const trafficOn = { 'disable-nonessential-traffic': true };
+
+  async function seed(value: string, flags: Record<string, unknown>, proxy = false) {
+    const manifest = manifestWithFlags(flags);
+    await fs.writeFile(path.join(tmpHome, '.devflow', 'manifest.json'), JSON.stringify({
+      ...manifest, features: { ...manifest.features, proxy },
+    }));
+    await fs.writeFile(path.join(tmpHome, '.claude', 'settings.json'), JSON.stringify({ env: { [codeModeKey]: value } }));
+  }
+
+  async function expectCodeMode(value: string, on: boolean) {
+    expect((await readManifest(tmpHome)).features.flags).toHaveProperty('code-mode', on);
+    expect((await readSettings(tmpHome)).env).toHaveProperty(codeModeKey, value);
+  }
+
+  function initOutput(args: string[] = []) {
+    const { status, stdout, stderr } = runInit(tmpHome, args);
+    const output = stdout + stderr;
+    expect(status, output).toBe(0);
+    expect(output).not.toContain('Could not configure settings.json');
+    return output;
+  }
+
+  function expectWarningOnce(output: string, warning: string) {
+    expect(output.split(warning), output).toHaveLength(2);
+  }
+
+  it.each([{ value: '0', on: false }, { value: '1', on: true }])(
+    'keeps an unrecorded Code Mode value of $value and records the flag as $on',
+    async ({ value, on }) => {
+      await seed(value, {});
+      initOutput();
+      await expectCodeMode(value, on);
+    },
+    SUBPROCESS_TIMEOUT_MS,
+  );
+
+  it('keeps a user override, records Code Mode off, and prints no blocker', async () => {
+    await seed('0', { 'code-mode': true, ...trafficOn });
+    const output = initOutput();
+
+    await expectCodeMode('0', false);
+    expect(output).not.toContain(CODE_MODE_TRAFFIC_BLOCKER);
+    expect(output).not.toContain(CODE_MODE_PROXY_BLOCKER);
+  }, SUBPROCESS_TIMEOUT_MS);
+
+  it('warns once about traffic when preflight fails, but not about the proxy', async () => {
+    await seed('1', { 'code-mode': true, ...trafficOn }, true);
+    const output = initOutput(['--proxy']);
+
+    expect(output).toContain('External model routing preflight failed:');
+    expect(output).not.toContain(CODE_MODE_PROXY_BLOCKER);
+    expectWarningOnce(output, CODE_MODE_TRAFFIC_BLOCKER);
+    expect((await readManifest(tmpHome)).features.proxy).toBe(false);
+    await expectCodeMode('1', true);
+  }, SUBPROCESS_TIMEOUT_MS);
+
+  it('warns once about traffic when both flags are on', async () => {
+    await seed('1', { 'code-mode': true, ...trafficOn });
+    const output = initOutput();
+
+    expectWarningOnce(output, CODE_MODE_TRAFFIC_BLOCKER);
+    expect((await readManifest(tmpHome)).features.flags).toMatchObject(trafficOn);
+    await expectCodeMode('1', true);
+  }, SUBPROCESS_TIMEOUT_MS);
+
+  it('warns once about the proxy after successful preflight and keeps both on', async () => {
+    await seed('1', {});
+    await fs.mkdir(path.join(tmpHome, '.codex'));
+    await fs.writeFile(path.join(tmpHome, '.codex', 'auth.json'), '{}');
+    // The loopback fixture serves a fixed health response. It sends no auth data.
+    const server = createServer((req, res) => {
+      if (req.method !== 'GET' || req.url !== '/__subswitch/health') {
+        res.writeHead(404).end();
+        return;
+      }
+      res.end('{"name":"subswitch"}');
+    });
+    try {
+      server.listen(0, '127.0.0.1');
+      await once(server, 'listening');
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected a TCP port');
+      const proxyPath = path.join(tmpHome, '.devflow', 'proxy.json');
+      await fs.writeFile(proxyPath, JSON.stringify({ enabled: false, port: address.port }));
+
+      const { stdout, stderr } = await promisify(execFile)(process.execPath, [CLI_PATH, ...MINIMAL_INIT, '--proxy'], {
+        cwd: tmpHome, env: sandboxEnv(tmpHome), timeout: SUBPROCESS_TIMEOUT_MS,
+      });
+
+      expectWarningOnce(stdout + stderr, CODE_MODE_PROXY_BLOCKER);
+      expect((await readManifest(tmpHome)).features.proxy).toBe(true);
+      expect(JSON.parse(await fs.readFile(proxyPath, 'utf-8'))).toMatchObject({ enabled: true, port: address.port });
+      await expectCodeMode('1', true);
+    } finally {
+      await server[Symbol.asyncDispose]();
+    }
+  }, SUBPROCESS_TIMEOUT_MS);
+});
+
 // ── One home: --scope retired, CLAUDE_CONFIG_DIR honoured, DEVFLOW_DIR ignored ──
 //
 // #389 (D-SCOPE-RETIRED, D-CLAUDE-CONFIG-DIR, D-ONE-HOME). Each init spawn is ~0.5 s;
@@ -756,8 +856,6 @@ function runCli(
   if (r.error) throw r.error;
   return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
 }
-
-const MINIMAL_INIT = ['init', '--recommended', '--no-ambient', '--no-memory', '--no-curation', '--no-knowledge', '--no-rules'];
 
 describe('resolveRetiredScopeOption (D-SCOPE-RETIRED)', () => {
   it('no flag and `user` in any case proceed', () => {

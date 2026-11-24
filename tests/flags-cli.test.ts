@@ -51,8 +51,9 @@ import * as os from 'os';
 import { PassThrough } from 'stream';
 import { createFlagsCommand, applyTuiResult } from '../src/cli/commands/flags.js';
 import { makeManifest } from './helpers.js';
-import type { FlagsRecord } from '../src/core/flags.js';
+import { FLAG_REGISTRY, neutralValueOf, type FlagsRecord } from '../src/core/flags.js';
 import { readManifest } from '../src/core/manifest.js';
+import * as codeMode from '../src/core/code-mode.js';
 // Direct import from terminal.js (not index.js) so the REL-M3 mock of index.js
 // does not affect the seam test's runFlagsTui reference.
 import { runFlagsTui } from '../src/cli/flags-view/terminal.js';
@@ -130,6 +131,423 @@ describe('flags CLI — createFlagsCommand factory', () => {
     process.exitCode = 0;
     await fs.rm(tmpClaudeDir, { recursive: true, force: true });
     await fs.rm(tmpHome, { recursive: true, force: true });
+  });
+
+  describe('Code Mode', () => {
+    const codeKey = 'CLAUDE_CODE_EXPERIMENTAL_CODE_MODE';
+    const trafficKey = 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC';
+    const relayUrl = 'http://127.0.0.1:4141';
+    const otherRelayUrl = 'http://127.0.0.1:4142';
+    const foreignUrl = 'https://gateway.example.test';
+    const fixtureAuth = 'fixture-auth-value';
+    const fixtureHelper = 'fixture-helper-command';
+
+    async function seed(flags: FlagsRecord, env: Record<string, string>, proxy = false) {
+      const base = makeManifest();
+      const manifest = { ...base, features: { ...base.features, flags, proxy } };
+      // Use the legacy layout so an accidental call to the heal-write path changes bytes.
+      const manifestPath = path.join(tmpDevflowDir, 'manifest.json');
+      const settingsPath = path.join(tmpClaudeDir, 'settings.json');
+      const manifestBytes = JSON.stringify(manifest);
+      const settingsBytes = JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: fixtureAuth, ...env }, apiKeyHelper: fixtureHelper });
+      await fs.writeFile(manifestPath, manifestBytes);
+      await fs.writeFile(settingsPath, settingsBytes);
+      return { manifestPath, settingsPath, manifestBytes, settingsBytes };
+    }
+
+    async function seedProxy(contents = '{"enabled":true}') {
+      await fs.writeFile(path.join(tmpDevflowDir, 'proxy.json'), contents);
+    }
+
+    async function expectUnchanged(files: Awaited<ReturnType<typeof seed>>) {
+      expect(await fs.readFile(files.manifestPath, 'utf-8')).toBe(files.manifestBytes);
+      expect(await fs.readFile(files.settingsPath, 'utf-8')).toBe(files.settingsBytes);
+    }
+
+    async function expectSaved(value: boolean, payload: string | undefined) {
+      const manifest = await fs.readFile(path.join(tmpDevflowDir, 'manifest.json'), 'utf-8');
+      const { env } = parseSettings(await fs.readFile(path.join(tmpClaudeDir, 'settings.json'), 'utf-8'));
+      expect(parseFlagsRecord(manifest)['code-mode']).toBe(value);
+      expect((env as Record<string, unknown> | undefined)?.[codeKey]).toBe(payload);
+      expect(process.exitCode).toBe(0);
+    }
+
+    async function runTui(changes: FlagsRecord, beforeSave?: () => Promise<void>) {
+      const streams = [process.stdin, process.stdout];
+      const tty = streams.map(stream => stream.isTTY);
+      streams.forEach(stream => Object.defineProperty(stream, 'isTTY', { value: true, configurable: true }));
+      vi.doMock('../src/cli/flags-view/index.js', () => ({
+        runFlagsTui: async (rows: ReturnType<typeof buildFlagRows>) => {
+          await beforeSave?.();
+          return {
+            action: 'save',
+            rows: rows.map(row => Object.hasOwn(changes, row.id)
+              ? { ...row, configuredValue: changes[row.id] }
+              : row),
+          };
+        },
+      }));
+      vi.resetModules();
+      try {
+        const { createFlagsCommand } = await import('../src/cli/commands/flags.js');
+        await createFlagsCommand().parseAsync([], { from: 'user' });
+      } finally {
+        streams.forEach((stream, i) => Object.defineProperty(stream, 'isTTY', { value: tty[i], configurable: true }));
+        vi.doUnmock('../src/cli/flags-view/index.js');
+        vi.resetModules();
+      }
+    }
+
+    function expectRefusal(message = codeMode.CODE_MODE_ENABLE_REFUSAL) {
+      expect(process.exitCode).toBe(1);
+      expect(vi.mocked(p.log.error).mock.calls).toEqual([[message]]);
+      expect(p.log.success).not.toHaveBeenCalled();
+      expect(p.outro).not.toHaveBeenCalled();
+    }
+
+    beforeEach(() => vi.clearAllMocks());
+
+    it.each([
+      ['--enable', 'code-mode'],
+      ['--enable', 'lsp,code-mode'],
+      ['--set', 'lsp=true', '--set', 'code-mode=true'],
+    ].map(args => ({ args })))('refuses $args as a whole before any file changes', async ({ args }) => {
+      const files = await seed({}, {});
+      await seedProxy();
+
+      await flagsCmd.parseAsync(args, { from: 'user' });
+
+      expectRefusal();
+      await expectUnchanged(files);
+    });
+
+    it.each([
+      { name: 'manifest', manifestProxy: true },
+      { name: 'corrupt state file', proxyJson: '{' },
+      { name: 'managed relay URL', url: relayUrl },
+      { name: 'relay URL on another port', url: otherRelayUrl },
+    ])('refuses enable on the $name signal alone', async ({ manifestProxy, proxyJson, url }) => {
+      const files = await seed({}, url ? { ANTHROPIC_BASE_URL: url } : {}, manifestProxy);
+      if (proxyJson) await seedProxy(proxyJson);
+
+      await flagsCmd.parseAsync(['--enable', 'code-mode'], { from: 'user' });
+
+      expectRefusal();
+      await expectUnchanged(files);
+    });
+
+    it('refuses a TUI save before it can heal a legacy manifest', async () => {
+      const files = await seed({ 'code-mode': false }, {});
+      await seedProxy();
+
+      await runTui({ 'code-mode': true });
+
+      expectRefusal();
+      await expectUnchanged(files);
+    });
+
+    it('refuses enable when a user value makes the recorded on state off', async () => {
+      const files = await seed({ 'code-mode': true }, { [codeKey]: '0' });
+      await seedProxy();
+
+      await flagsCmd.parseAsync(['--enable', 'code-mode'], { from: 'user' });
+
+      expectRefusal();
+      await expectUnchanged(files);
+    });
+
+    it('refuses enable when the signal reader fails', async () => {
+      const files = await seed({}, {});
+      const reader = vi.spyOn(codeMode, 'readCodeModeSignals').mockResolvedValue({ ok: false, error: fixtureAuth });
+      try {
+        await flagsCmd.parseAsync(['--enable', 'code-mode'], { from: 'user' });
+      } finally {
+        reader.mockRestore();
+      }
+
+      expectRefusal(codeMode.CODE_MODE_READ_FAILURE);
+      await expectUnchanged(files);
+    });
+
+    it.each([
+      { name: '--disable code-mode', args: ['--disable', 'code-mode'], codeOn: false, lspOn: false },
+      { name: '--enable lsp', args: ['--enable', 'lsp'], codeOn: true, lspOn: true },
+      { name: 'an unrelated TUI save', args: [], codeOn: true, lspOn: true },
+    ])('persists $name when the Code Mode check cannot read its signals', async ({ args, codeOn, lspOn }) => {
+      const neutralFlags: FlagsRecord = Object.fromEntries(FLAG_REGISTRY.map(flag => [flag.id, neutralValueOf(flag)] as const));
+      const files = await seed({ ...neutralFlags, 'code-mode': true }, { [codeKey]: '1' });
+      const readSignals = vi.fn<typeof codeMode.readCodeModeSignals>().mockResolvedValue({
+        ok: true, value: { env: undefined, record: null, proxyOn: false },
+      });
+      vi.doMock('../src/core/code-mode.js', async importOriginal => ({
+        ...await importOriginal<typeof codeMode>(),
+        readCodeModeSignals: readSignals,
+      }));
+      vi.resetModules();
+      try {
+        if (args.length === 0) await runTui({ lsp: true });
+        else {
+          const { createFlagsCommand } = await import('../src/cli/commands/flags.js');
+          await createFlagsCommand().parseAsync(args, { from: 'user' });
+        }
+      } finally {
+        vi.doUnmock('../src/core/code-mode.js');
+        vi.resetModules();
+      }
+
+      expect(readSignals).toHaveBeenCalled();
+      expect(process.exitCode).toBe(0);
+      expect(p.log.error).not.toHaveBeenCalled();
+      expect(parseFlagsRecord(await fs.readFile(files.manifestPath, 'utf-8'))).toEqual({
+        ...neutralFlags, 'code-mode': codeOn, lsp: lspOn,
+      });
+      expect(parseSettings(await fs.readFile(files.settingsPath, 'utf-8'))).toEqual({
+        env: {
+          ANTHROPIC_AUTH_TOKEN: fixtureAuth,
+          ...(codeOn ? { [codeKey]: '1' } : {}),
+          ...(lspOn ? { ENABLE_LSP_TOOL: 'true' } : {}),
+        },
+        apiKeyHelper: fixtureHelper,
+      });
+    });
+
+    describe.each([
+      { name: 'CLI Code Mode enable', args: ['--enable', 'code-mode'], afterLaunch: false,
+        message: 'Cannot make this change because Devflow could not check the Code Mode and proxy state. Check your Claude Code user settings.json.' },
+      { name: 'CLI unrelated enable', args: ['--enable', 'lsp'], afterLaunch: false },
+      { name: 'TUI launch', args: [], afterLaunch: false },
+      { name: 'TUI save', args: [], afterLaunch: true },
+    ])('$name', ({ args, afterLaunch, message }) => {
+      const readError = 'Cannot read settings.json. Check access, file type, and size (1 MiB limit).';
+
+      async function tryWrite(replaceSettings: () => Promise<void>) {
+        if (!afterLaunch) await replaceSettings();
+        if (args.length > 0) {
+          await flagsCmd.parseAsync(args, { from: 'user' });
+        } else {
+          const beforeSave = vi.fn(async () => {
+            if (afterLaunch) await replaceSettings();
+          });
+          await runTui({ lsp: true }, beforeSave);
+          expect(beforeSave).toHaveBeenCalledTimes(afterLaunch ? 1 : 0);
+        }
+      }
+
+      it.each([
+        {
+          name: 'a file over the read limit',
+          bytes: () => Buffer.from(JSON.stringify({
+            env: { ANTHROPIC_BASE_URL: relayUrl },
+            pad: 'x'.repeat(1024 * 1024),
+          })),
+          error: readError,
+        },
+        {
+          name: 'a file with invalid UTF-8',
+          bytes: () => Buffer.concat([
+            Buffer.from(`{"env":{"ANTHROPIC_BASE_URL":"${relayUrl}"},"pad":"`),
+            Buffer.from([0xff]),
+            Buffer.from('"}'),
+          ]),
+          error: 'settings.json is not valid UTF-8. Fix the file before you change flags.',
+        },
+      ])('refuses $name without changes to either file', async ({ bytes, error }) => {
+        const files = await seed({}, {});
+        const settingsBytes = bytes();
+
+        await tryWrite(() => fs.writeFile(files.settingsPath, settingsBytes));
+
+        expectRefusal(message ?? error);
+        expect(await fs.readFile(files.settingsPath)).toEqual(settingsBytes);
+        expect(await fs.readFile(files.manifestPath)).toEqual(Buffer.from(files.manifestBytes));
+      });
+
+      it('refuses a directory in place of settings.json without changes to either path', async () => {
+        const files = await seed({}, {});
+
+        await tryWrite(async () => {
+          await fs.unlink(files.settingsPath);
+          await fs.mkdir(files.settingsPath);
+        });
+
+        expectRefusal(message ?? readError);
+        expect(await fs.readdir(files.settingsPath)).toEqual([]);
+        expect(await fs.readFile(files.manifestPath)).toEqual(Buffer.from(files.manifestBytes));
+      });
+    });
+
+    it.each([
+      { args: ['--disable', 'code-mode'] },
+      { args: ['--unset', 'code-mode'] },
+      { args: ['--set', 'code-mode=false'] },
+      { args: ['--set', 'code-mode=unset'] },
+      { args: ['--set', 'code-mode=true', '--set', 'code-mode=false'], initiallyOn: false },
+    ])('allows $args while the proxy is on', async ({ args, initiallyOn = true }) => {
+      await seed({ 'code-mode': initiallyOn }, initiallyOn ? { [codeKey]: '1' } : {});
+      await seedProxy();
+
+      await flagsCmd.parseAsync(args, { from: 'user' });
+
+      await expectSaved(false, undefined);
+      expect(p.log.warn).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { name: '--disable', args: ['--disable', 'code-mode'] },
+      { name: 'an unrelated CLI write', args: ['--enable', 'lsp'] },
+      { name: 'an unrelated TUI save', args: [] },
+    ])('keeps a user value and records off on $name', async ({ args }) => {
+      await seed({ 'code-mode': true }, { [codeKey]: '0' });
+      await seedProxy();
+
+      if (args.length > 0) await flagsCmd.parseAsync(args, { from: 'user' });
+      else await runTui({ lsp: true });
+
+      await expectSaved(false, '0');
+      expect(p.log.warn).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { name: '--enable', args: ['--enable', 'code-mode'] },
+      { name: '--set', args: ['--set', 'code-mode=true'] },
+      { name: 'TUI save', args: [] },
+    ])('replaces a user value on explicit enable via $name when the proxy is off', async ({ args }) => {
+      const files = await seed({ 'code-mode': true }, { [codeKey]: '0', ANTHROPIC_BASE_URL: foreignUrl });
+
+      if (args.length > 0) await flagsCmd.parseAsync(args, { from: 'user' });
+      else await runTui({ 'code-mode': true });
+
+      await expectSaved(true, '1');
+      const { env, apiKeyHelper } = parseSettings(await fs.readFile(files.settingsPath, 'utf-8'));
+      expect(env).toMatchObject({ ANTHROPIC_BASE_URL: foreignUrl, ANTHROPIC_AUTH_TOKEN: fixtureAuth });
+      expect(apiKeyHelper).toBe(fixtureHelper);
+      expect(vi.mocked(p.log.success).mock.calls.flat().join('\n')).toContain(codeMode.CODE_MODE_NEW_SESSIONS_SUFFIX);
+    });
+
+    it.each([
+      { flags: { 'code-mode': true }, initial: '1', fresh: '0', on: false },
+      { flags: {}, initial: '0', fresh: '1', on: true },
+    ])('keeps a user change from $initial to $fresh while the editor is open', async ({ flags, initial, fresh, on }) => {
+      const { settingsPath } = await seed(flags, { [codeKey]: initial });
+      await runTui({ lsp: true }, () => fs.writeFile(settingsPath, JSON.stringify({ env: { [codeKey]: fresh } })));
+      await expectSaved(on, fresh);
+    });
+
+    it('keeps a hand-set on value on an unrelated TUI save', async () => {
+      await seed({}, { [codeKey]: '1' });
+
+      await runTui({ lsp: true });
+
+      await expectSaved(true, '1');
+    });
+
+    it('allows CLI re-enable when Code Mode and the proxy are already on', async () => {
+      await seed({ 'code-mode': true }, { [codeKey]: '1' });
+      await seedProxy();
+
+      await flagsCmd.parseAsync(['--enable', 'code-mode'], { from: 'user' });
+
+      await expectSaved(true, '1');
+      expect(p.log.error).not.toHaveBeenCalled();
+      expect(p.log.success).toHaveBeenCalledOnce();
+      expect(vi.mocked(p.log.warn).mock.calls).toEqual([[
+        'Code Mode does not start while the Devflow proxy is on. Run `devflow flags --disable code-mode` or `devflow proxy --disable`.',
+      ]]);
+    });
+
+    it('allows an unrelated TUI save when Code Mode and the proxy are already on', async () => {
+      await seed({ 'code-mode': true }, { [codeKey]: '1' });
+      await seedProxy();
+
+      await runTui({ lsp: true });
+
+      await expectSaved(true, '1');
+      expect(vi.mocked(p.log.warn).mock.calls).toEqual([[codeMode.CODE_MODE_PROXY_BLOCKER]]);
+    });
+
+    it.each([
+      { id: 'code-mode', flags: { 'disable-nonessential-traffic': true } },
+      { id: 'disable-nonessential-traffic', flags: { 'code-mode': true } },
+    ])('warns once when a successful enable of $id leaves both flags on', async ({ id, flags }) => {
+      await seed(flags, {});
+
+      await flagsCmd.parseAsync(['--enable', id], { from: 'user' });
+
+      await expectSaved(true, '1');
+      expect(vi.mocked(p.log.warn).mock.calls).toEqual([[codeMode.CODE_MODE_TRAFFIC_BLOCKER]]);
+    });
+
+    it('warns on --unset of an unrelated flag when the proxy and Code Mode stay on', async () => {
+      await seed({ 'code-mode': true, lsp: true }, { [codeKey]: '1', ANTHROPIC_BASE_URL: relayUrl });
+
+      await flagsCmd.parseAsync(['--unset', 'lsp'], { from: 'user' });
+
+      await expectSaved(true, '1');
+      expect(vi.mocked(p.log.warn).mock.calls).toEqual([[codeMode.CODE_MODE_PROXY_BLOCKER]]);
+    });
+
+    it('lists settings-only blockers without a manifest or any file changes', async () => {
+      const settingsPath = path.join(tmpClaudeDir, 'settings.json');
+      const settings = JSON.stringify({ env: { [codeKey]: '1', [trafficKey]: '1', ANTHROPIC_BASE_URL: relayUrl } });
+      await fs.writeFile(settingsPath, settings);
+
+      await flagsCmd.parseAsync(['--list'], { from: 'user' });
+
+      expect(vi.mocked(p.log.warn).mock.calls).toEqual([[codeMode.CODE_MODE_PROXY_BLOCKER], [codeMode.CODE_MODE_TRAFFIC_BLOCKER]]);
+      expect(process.exitCode).toBe(0);
+      expect(await fs.readdir(tmpDevflowDir)).toEqual([]);
+      expect(await fs.readFile(settingsPath, 'utf-8')).toBe(settings);
+    });
+
+    it('does not use machine signals when it lists flags', async () => {
+      const files = await seed({ 'code-mode': true, 'disable-nonessential-traffic': true }, { [codeKey]: '1' }, true);
+      await seedProxy();
+
+      await flagsCmd.parseAsync(['--list'], { from: 'user' });
+
+      expect(p.log.warn).not.toHaveBeenCalled();
+      await expectUnchanged(files);
+    });
+
+    it.each([
+      { name: 'a hand-set on value', flags: { 'code-mode': false }, payload: '1',
+        lines: [codeMode.CODE_MODE_PROXY_BLOCKER, codeMode.CODE_MODE_TRAFFIC_BLOCKER, codeMode.CODE_MODE_RECORD_FALSE_NOTE] },
+      { name: 'a user override', flags: { 'code-mode': true }, payload: '0',
+        lines: [codeMode.CODE_MODE_USER_VALUE_NOTE] },
+    ])('reports $name with fixed status lines and does not heal files', async ({ flags, payload, lines }) => {
+      const files = await seed(flags, { [codeKey]: payload, [trafficKey]: '1', ANTHROPIC_BASE_URL: relayUrl });
+
+      await flagsCmd.parseAsync(['--status'], { from: 'user' });
+
+      const reported = [...vi.mocked(p.log.warn).mock.calls, ...vi.mocked(p.log.info).mock.calls].flat().join('\n');
+      for (const line of lines) expect(reported).toContain(line);
+      if (payload === '0') {
+        expect(reported).not.toContain(codeMode.CODE_MODE_PROXY_BLOCKER);
+        expect(reported).not.toContain(codeMode.CODE_MODE_TRAFFIC_BLOCKER);
+      }
+      for (const fixture of [relayUrl, fixtureAuth, fixtureHelper]) expect(reported).not.toContain(fixture);
+      expect(process.exitCode).toBe(0);
+      await expectUnchanged(files);
+    });
+
+    it('prints blockers after the bare non-TTY table and keeps its exit code', async () => {
+      const files = await seed({ 'code-mode': true, 'disable-nonessential-traffic': true }, { ANTHROPIC_BASE_URL: relayUrl });
+      const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+      const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      let output: string;
+      try {
+        await flagsCmd.parseAsync([], { from: 'user' });
+        output = stdout.mock.calls.map(([line]) => String(line)).join('');
+      } finally {
+        stdout.mockRestore();
+        stderr.mockRestore();
+      }
+
+      expect(output).toMatch(/code-mode\s+on/);
+      expect(output).toContain(`${codeMode.CODE_MODE_PROXY_BLOCKER}\n${codeMode.CODE_MODE_TRAFFIC_BLOCKER}\n`);
+      expect(process.exitCode).toBe(1);
+      await expectUnchanged(files);
+    });
   });
 
   // ─── --list ───────────────────────────────────────────────────────────────────
@@ -1062,7 +1480,7 @@ describe('flags CLI — createFlagsCommand factory', () => {
       Object.defineProperty(process.stdin, 'isTTY', { value: origStdinIsTTY, configurable: true });
       // Remove the doMock registration and clear module cache so subsequent tests
       // get the real flags-view implementation.
-      vi.unmock('../src/cli/flags-view/index.js');
+      vi.doUnmock('../src/cli/flags-view/index.js');
       vi.resetModules();
     });
 
@@ -1143,7 +1561,7 @@ describe('flags CLI — createFlagsCommand factory', () => {
     afterEach(() => {
       Object.defineProperty(process.stdout, 'isTTY', { value: origStdoutIsTTY, configurable: true });
       Object.defineProperty(process.stdin, 'isTTY', { value: origStdinIsTTY, configurable: true });
-      vi.unmock('../src/cli/flags-view/index.js');
+      vi.doUnmock('../src/cli/flags-view/index.js');
       vi.resetModules();
     });
 
@@ -1207,7 +1625,7 @@ describe('flags CLI — createFlagsCommand factory', () => {
     afterEach(() => {
       Object.defineProperty(process.stdout, 'isTTY', { value: origStdoutIsTTY, configurable: true });
       Object.defineProperty(process.stdin, 'isTTY', { value: origStdinIsTTY, configurable: true });
-      vi.unmock('../src/cli/flags-view/index.js');
+      vi.doUnmock('../src/cli/flags-view/index.js');
       vi.resetModules();
     });
 

@@ -17,7 +17,6 @@
  */
 
 import { Command } from 'commander';
-import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as p from '@clack/prompts';
 import color from 'picocolors';
@@ -40,8 +39,23 @@ import {
   type FlagsRecord,
   type FlagsRecordValue,
 } from '../../core/flags.js';
+import {
+  CODE_MODE_NEW_SESSIONS_SUFFIX,
+  CODE_MODE_READ_FAILURE,
+  MAX_SETTINGS_BYTES,
+  codeModeBlockers,
+  codeModeRefusal,
+  codeModeStatusNotes,
+  isCodeModeOn,
+  isTrafficOn,
+  readCodeModeSignals,
+  turnsOnCodeMode,
+  writeTimeWarnings,
+} from '../../core/code-mode.js';
+import type { CodeModeBlockerState, CodeModeSignals } from '../../core/code-mode.js';
 import { readManifest, writeManifest } from '../../core/manifest.js';
 import { writeSettingsFileAtomic } from '../../core/fs-atomic.js';
+import { readFileBytes } from '../../core/read-file-bytes.js';
 import { sanitizeCell } from '../tui/cells.js';
 // Static imports for pure view-state helpers — no TTY machinery.
 // runFlagsTui stays lazily imported in handleBare to keep TTY module out of
@@ -51,25 +65,54 @@ import type { FlagsTuiResult } from '../flags-view/terminal.js';
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
-/**
- * Read and parse settings.json.
- * ENOENT → returns `{ content: '{}', ok: true }`.
- * Malformed JSON → returns `{ ok: false, reason: string }`.
- *
- * NEVER silently falls back to '{}' on malformed JSON — that would clobber the
- * user's settings. The caller must abort with exit code 1 on !ok.
- */
+function blockerState({ record, env, proxyOn }: CodeModeSignals): CodeModeBlockerState {
+  return { codeModeOn: isCodeModeOn(record, env), trafficOn: isTrafficOn(record, env), proxyOn };
+}
+
+interface CodeModeWrite {
+  readonly before: CodeModeBlockerState | undefined;
+  readonly explicitOn?: readonly string[];
+}
+
+/** Preflight must finish before any path that can write. */
+async function checkCodeModeWrite(
+  claudeDir: string,
+  devflowDir: string,
+  requestedOn: boolean,
+): Promise<{ ok: true; value: CodeModeWrite } | { ok: false }> {
+  const signals = await readCodeModeSignals(claudeDir, devflowDir);
+  const before = signals.ok ? blockerState(signals.value) : undefined;
+  const turnsOn = before !== undefined && turnsOnCodeMode(before.codeModeOn, requestedOn);
+  const refusal = requestedOn && (!signals.ok || signals.value.env === undefined)
+    ? CODE_MODE_READ_FAILURE
+    : before && codeModeRefusal(before, turnsOn);
+  if (refusal) {
+    p.log.error(refusal);
+    process.exitCode = 1;
+    return { ok: false };
+  }
+  return { ok: true, value: { before, explicitOn: turnsOn ? ['code-mode'] : undefined } };
+}
+
+function logFlagSuccess(id: string, line: string): void {
+  p.log.success(id === 'code-mode' ? `${line}. ${CODE_MODE_NEW_SESSIONS_SUFFIX}` : line);
+}
+
+/** Initialize only when settings.json is absent. Refuse input the writer cannot preserve. */
 async function readSettingsSafe(
   settingsPath: string,
 ): Promise<{ ok: true; content: string } | { ok: false; reason: string }> {
+  const bytes = await readFileBytes(settingsPath, MAX_SETTINGS_BYTES);
+  if (bytes === 'absent') return { ok: true, content: '{}' };
+  if (typeof bytes === 'string') {
+    return { ok: false, reason: 'Cannot read settings.json. Check access, file type, and size (1 MiB limit).' };
+  }
+
   let raw: string;
   try {
-    raw = await fs.readFile(settingsPath, 'utf-8');
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      return { ok: true, content: '{}' };
-    }
-    return { ok: false, reason: `Cannot read settings.json: ${(err as Error).message}` };
+    raw = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    return { ok: false, reason: 'settings.json is not valid UTF-8. Fix the file before you change flags.' };
   }
 
   // REL-M2 + PERF-L4: single parse — validate root shape and return raw string.
@@ -134,7 +177,7 @@ async function persistFlagConfig(
   // does not re-read it (two snapshots, one write; readManifest also self-heals
   // = extra write). null → {ok:false,reason:'no-manifest'} (C2 discriminant intact).
   manifest: NonNullable<Awaited<ReturnType<typeof readManifest>>> | null,
-  opts: { viewModeExplicit: boolean } = { viewModeExplicit: false },
+  opts: CodeModeWrite & { readonly viewModeExplicit?: boolean },
 ): Promise<PersistResult> {
   // D15: convergeFlagsIntoSettings is the fold-before-strip pipeline entry point
   // (REG-H1, ARCH-H1). ownedRecord is omitted so the
@@ -144,7 +187,7 @@ async function persistFlagConfig(
   const { settings: updatedSettings, record: foldedRecord } = convergeFlagsIntoSettings(
     settingsContent,
     newRecord,
-    opts,
+    { viewModeExplicit: opts.viewModeExplicit ?? false, explicitOn: opts.explicitOn },
   );
 
   // Accumulate each artifact's failure independently; combine at the end.
@@ -185,8 +228,13 @@ async function persistFlagConfig(
     process.exitCode = 1;
   }
 
-  // OR the locals afterwards — never compose required side effects with ||/&&.
-  return failed.length > 0 ? { ok: false, failed } : { ok: true };
+  if (failed.length > 0) return { ok: false, failed };
+
+  const after = await readCodeModeSignals(claudeDir, devflowDir);
+  if (after.ok) {
+    for (const line of writeTimeWarnings(opts.before, blockerState(after.value))) p.log.warn(line);
+  }
+  return { ok: true };
 }
 
 // ─── Shared utilities ─────────────────────────────────────────────────────────
@@ -210,7 +258,8 @@ async function loadFlagContext(
   claudeDir: string,
   devflowDir: string,
 ): Promise<{ ok: true; value: FlagContext } | { ok: false; reason: string }> {
-  const manifest = await readManifest(devflowDir);
+  // Defer manifest writes until persist, so a refused or canceled TUI save leaves no changes.
+  const manifest = await readManifest(devflowDir, { heal: false });
   if (!manifest) {
     return { ok: false, reason: 'No devflow installation found — run devflow init first' };
   }
@@ -255,8 +304,8 @@ function formatStatusRows(record: FlagsRecord): string[] {
 // carries one responsibility. The dispatcher (createFlagsCommand action) is ~15
 // lines and routes without logic of its own (ARCH-M1, CPLX-H1).
 
-/** Handle --list: read-only registry dump, no manifest required. */
-async function handleList(): Promise<void> {
+/** Handle --list: read only the registry and user settings env. */
+async function handleList(claudeDir: string): Promise<void> {
   p.intro(color.bgCyan(color.black(' Claude Code Flags ')));
   for (const flag of FLAG_REGISTRY) {
     const kindLabel = describeFlagKind(flag);
@@ -278,13 +327,25 @@ async function handleList(): Promise<void> {
       `  ${color.dim(flag.hint)} — default: ${color.cyan(defaultLabel)}`,
     );
   }
+  const signals = await readCodeModeSignals(claudeDir, null);
+  if (signals.ok && signals.value.env !== undefined) {
+    for (const line of codeModeBlockers(blockerState(signals.value))) p.log.warn(line);
+  }
   p.outro(color.dim('Use --enable / --disable / --set / --unset to manage flags'));
 }
 
+async function statusCodeModeLines(claudeDir: string, devflowDir: string): Promise<string[]> {
+  const signals = await readCodeModeSignals(claudeDir, devflowDir);
+  return signals.ok ? [
+    ...codeModeBlockers(blockerState(signals.value)),
+    ...codeModeStatusNotes(signals.value),
+  ] : [];
+}
+
 /** Handle --status: read-only status table, degrades gracefully without a manifest. */
-async function handleStatus(devflowDir: string): Promise<void> {
+async function handleStatus(claudeDir: string, devflowDir: string): Promise<void> {
   p.intro(color.bgCyan(color.black(' Claude Code Flags — Status ')));
-  const manifest = await readManifest(devflowDir);
+  const manifest = await readManifest(devflowDir, { heal: false });
   if (!manifest) {
     p.log.warn('Devflow is not installed — run devflow init first');
     p.log.info('Showing registry defaults only:');
@@ -293,6 +354,7 @@ async function handleStatus(devflowDir: string): Promise<void> {
   for (const row of formatStatusRows(record)) {
     p.log.info(row);
   }
+  for (const line of await statusCodeModeLines(claudeDir, devflowDir)) p.log.warn(line);
   p.outro(color.dim('Use --enable / --disable / --set / --unset to change flags'));
 }
 
@@ -331,6 +393,9 @@ async function handleSetBooleans(
     flagDefs.push(flag);
   }
 
+  const check = await checkCodeModeWrite(claudeDir, devflowDir, value && ids.includes('code-mode'));
+  if (!check.ok) return;
+
   // Manifest required for mutating ops (avoids settings/manifest desync)
   const ctx = await loadFlagContext(claudeDir, devflowDir);
   if (!ctx.ok) {
@@ -345,13 +410,13 @@ async function handleSetBooleans(
     newRecord[flag.id] = value;
   }
 
-  const result = await persistFlagConfig(claudeDir, devflowDir, ctx.value.settingsContent, newRecord, ctx.value.manifest);
+  const result = await persistFlagConfig(claudeDir, devflowDir, ctx.value.settingsContent, newRecord, ctx.value.manifest, check.value);
 
   if (result.ok) {
     for (const flag of flagDefs) {
       // D-EFFDV: formatFlagValue routes through effectiveDisplay — one vocabulary
       // shared with --status and TUI so the three surfaces cannot drift.
-      p.log.success(`${flag.id} ${formatFlagValue(flag, value)}`);
+      logFlagSuccess(flag.id, `${flag.id} ${formatFlagValue(flag, value)}`);
     }
   }
 }
@@ -364,6 +429,7 @@ async function handleSet(
 ): Promise<void> {
   // Phase: parse and validate ALL assignments before any mutation.
   const assignments: Array<{ id: string; flag: ClaudeCodeFlag; value: FlagsRecordValue }> = [];
+  let requestedOn = false;
 
   for (const assignment of setValues) {
     // Split on first = only — rest is the value (e.g. spellcheck=a=b → id='spellcheck', value='a=b')
@@ -402,7 +468,12 @@ async function handleSet(
     }
 
     assignments.push({ id, flag, value });
+    // The last assignment wins in both preflight and the record.
+    if (id === 'code-mode') requestedOn = value === true;
   }
+
+  const check = await checkCodeModeWrite(claudeDir, devflowDir, requestedOn);
+  if (!check.ok) return;
 
   // All assignments valid — load manifest + settings
   const ctx = await loadFlagContext(claudeDir, devflowDir);
@@ -424,7 +495,7 @@ async function handleSet(
   const viewModeExplicit = assignments.some(a => a.id === 'view-mode');
   const result = await persistFlagConfig(
     claudeDir, devflowDir, ctx.value.settingsContent, newRecord, ctx.value.manifest,
-    { viewModeExplicit },
+    { ...check.value, viewModeExplicit },
   );
 
   if (result.ok) {
@@ -432,7 +503,7 @@ async function handleSet(
       // null means the user typed 'unset' explicitly — echo their word back.
       // For active values, route through formatFlagValue (D-EFFDV vocabulary).
       const displayText = value === null ? 'unset' : formatFlagValue(flag, value);
-      p.log.success(`${id} = ${displayText}`);
+      logFlagSuccess(id, `${id} = ${displayText}`);
     }
   }
 }
@@ -473,14 +544,16 @@ async function handleUnset(
 
   // viewModeExplicit: true when the user explicitly unset view-mode.
   const viewModeExplicit = ids.includes('view-mode');
+  const check = await checkCodeModeWrite(claudeDir, devflowDir, false);
+  if (!check.ok) return;
   const result = await persistFlagConfig(
     claudeDir, devflowDir, ctx.value.settingsContent, newRecord, ctx.value.manifest,
-    { viewModeExplicit },
+    { ...check.value, viewModeExplicit },
   );
 
   if (result.ok) {
     for (const id of ids) {
-      p.log.success(`${id} unset`);
+      logFlagSuccess(id, `${id} unset`);
     }
   }
 }
@@ -499,9 +572,8 @@ async function handleUnset(
  * @param manifest     Loaded manifest threaded from loadFlagContext before TUI launch.
  * @param claudeDir    Path to ~/.claude directory (for settings.json write).
  * @param devflowDir   Path to ~/.devflow directory (for manifest write).
- * @returns 'saved' on successful persist, 'unchanged' for cancel/abort,
- *          or the PersistResult error discriminant when persist fails
- *          (persistFlagConfig already logged + set exitCode in that case).
+ * @returns 'saved' on success, 'unchanged' for cancel/abort, 'refused' on preflight failure,
+ *          or the PersistResult error discriminant when persist fails. Errors are already logged.
  */
 export async function applyTuiResult(
   result: FlagsTuiResult,
@@ -509,7 +581,7 @@ export async function applyTuiResult(
   manifest: NonNullable<Awaited<ReturnType<typeof readManifest>>>,
   claudeDir: string,
   devflowDir: string,
-): Promise<'saved' | 'unchanged' | Extract<PersistResult, { ok: false }>> {
+): Promise<'saved' | 'unchanged' | 'refused' | Extract<PersistResult, { ok: false }>> {
   if (result.action !== 'save') {
     return 'unchanged';
   }
@@ -519,11 +591,24 @@ export async function applyTuiResult(
   // viewModeExplicit: true if the user changed the view-mode row in the TUI
   const viewModeExplicit = newRecord['view-mode'] !== existingRecord['view-mode'];
 
+  const codeModeRow = result.rows.find(row => row.id === 'code-mode');
+  const codeModeEdited = codeModeRow !== undefined && codeModeRow.configuredValue !== codeModeRow.originalValue;
+  if (!codeModeEdited) {
+    // A save of other rows must respect a settings edit made while the editor was open.
+    const seed = respectUserOwnedSettings(existingRecord, existingRecord, freshSettingsContent);
+    newRecord['code-mode'] = seed['code-mode'] === true;
+  }
+  const check = await checkCodeModeWrite(claudeDir, devflowDir, codeModeEdited && codeModeRow.configuredValue === true);
+  if (!check.ok) return 'refused';
+
   const persistResult = await persistFlagConfig(
     claudeDir, devflowDir, freshSettingsContent, newRecord, manifest,
-    { viewModeExplicit },
+    { ...check.value, viewModeExplicit },
   );
   if (persistResult.ok) {
+    if (codeModeEdited) {
+      logFlagSuccess(codeModeRow.id, `${codeModeRow.id} ${formatFlagValue(codeModeRow.def, codeModeRow.configuredValue)}`);
+    }
     return 'saved';
   }
   return persistResult;
@@ -569,12 +654,8 @@ async function handleBare(
 
     // ── Build initial rows from registry + current record ──────────────
     // buildFlagRows is a static import (pure — no TTY); only runFlagsTui is lazy.
-    // D-ADOPT-RESPECTS-USER: a guarded setting flag the manifest has not recorded yet
-    // (an upgrade before the first init) would show its registry default, and a Save
-    // would write the managed payload over a value the user owns. The same rule init
-    // applies decides the starting row: respectUserOwnedSettings (the one authority,
-    // built on settingHoldsUserValue) flips such a flag to OFF. The settings snapshot
-    // is read here and passed in, so the reducer and renderer stay pure.
+    // Use the same settings fold as init. It preserves user-owned values and
+    // adopts an unclaimed exact payload before the editor builds its rows.
     const initialRows = buildFlagRows(
       respectUserOwnedSettings(record, record, ctx.value.settingsContent),
     );
@@ -611,17 +692,18 @@ async function handleBare(
       if (outcome === 'saved') {
         p.outro(color.green('Flags saved.'));
       }
-      // Error outcomes: persistFlagConfig already logged and set exitCode.
+      // A refusal or persist error is already logged with exitCode set.
     } else {
       p.outro(color.dim('No changes made.'));
     }
   } else {
     // non-TTY: status table — degrades gracefully without manifest (read-only).
-    const manifest = await readManifest(devflowDir);
+    const manifest = await readManifest(devflowDir, { heal: false });
     const record: FlagsRecord = manifest?.features.flags ?? {};
     for (const row of formatStatusRows(record)) {
       process.stdout.write(`${row}\n`);
     }
+    for (const line of await statusCodeModeLines(claudeDir, devflowDir)) process.stdout.write(`${line}\n`);
     process.stderr.write('Note: interactive TUI requires a TTY. Use --enable/--disable/--set/--unset for mutations.\n');
     process.exitCode = 1;
   }
@@ -671,8 +753,8 @@ export function createFlagsCommand(): Command {
       const devflowDir = getDevFlowDirectory();
       const splitIds = (s: string): string[] => s.split(',').map(t => t.trim()).filter(Boolean);
 
-      if (options.list) return handleList();
-      if (options.status) return handleStatus(devflowDir);
+      if (options.list) return handleList(claudeDir);
+      if (options.status) return handleStatus(claudeDir, devflowDir);
       if (options.enable !== undefined) return handleSetBooleans(claudeDir, devflowDir, splitIds(options.enable), true);
       if (options.disable !== undefined) return handleSetBooleans(claudeDir, devflowDir, splitIds(options.disable), false);
       if (options.set && options.set.length > 0) return handleSet(claudeDir, devflowDir, options.set);
